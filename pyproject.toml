@@ -31,12 +31,8 @@ inference = [
 server = "food_delivery_openenv.server.app:main"
 
 [tool.setuptools]
-include-package-data = true
-packages = [
-    "food_delivery_openenv",
-    "food_delivery_openenv.server",
-]
-package-dir = {
-    "food_delivery_openenv"        = ".",
-    "food_delivery_openenv.server" = "server",
-}
+py-modules = ["models", "client"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["server*", "tasks*", "training*"]

@@ -1,60 +1,65 @@
 """
-Food Delivery Dispatch — LLM-Based Inference Agent.
+Food Delivery Dispatch — LLM-Based Inference Agent (HuggingFace Router).
 
-An LLM (via OpenAI-compatible API) observes the environment state each step
+An LLM (via HuggingFace router API) observes the environment state each step
 and decides which dispatch action to take.  The agent is prompted with the
 full observation (pending orders, idle drivers, traffic, history) and must
 return a valid JSON action.
 
-Log format:
+STRICT Log format (NO extra output allowed):
     [START] task=<task> env=<image> model=<model>
     [STEP]  step=<n> action=<json> reward=<float> done=<bool> error=<null|msg>
     [END]   success=<bool> steps=<n> score=<float> rewards=<list>
 
 Environment variables:
-    API_BASE_URL   — OpenAI-compatible API base (default: https://api.openai.com/v1)
-    MODEL_NAME     — Model to use        (default: gpt-4o-mini)
-    HF_TOKEN       — Hugging Face token  (optional, for private HF spaces)
-    IMAGE_NAME     — Docker image name   (default: food_delivery_openenv-env:latest)
+    HF_TOKEN       — HuggingFace token (primary API key)
+    API_KEY        — Alternative API key
+    API_BASE_URL   — API base URL (default: https://router.huggingface.co/v1)
+    MODEL_NAME     — Model to use (default: Qwen/Qwen2.5-72B-Instruct)
+    IMAGE_NAME     — Docker image name (default: food_delivery_openenv-env:latest)
     TASK           — easy | medium | hard (default: medium)
-    MAX_STEPS      — Override max steps  (optional)
-    MAX_RETRIES    — LLM retry attempts  (default: 3)
+    MAX_RETRIES    — LLM retry attempts (default: 3)
 """
 
 from __future__ import annotations
 
-import json
 import os
 import sys
+sys.path.append(os.path.abspath("."))
+
+import json
 import time
 import traceback
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from openai import OpenAI
 
 # ---------------------------------------------------------------------------
-# Environment variables
+# Environment variables — HuggingFace router
 # ---------------------------------------------------------------------------
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME   = os.getenv("MODEL_NAME",   "gpt-4o-mini")
-HF_TOKEN     = os.getenv("HF_TOKEN",     "")
-IMAGE_NAME   = os.getenv("IMAGE_NAME",   "food_delivery_openenv-env:latest")
-TASK         = os.getenv("TASK",         "medium")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME   = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY", "")
+IMAGE_NAME   = os.getenv("IMAGE_NAME", "food_delivery_openenv-env:latest")
+TASK         = os.getenv("TASK", "medium")
 MAX_RETRIES  = int(os.getenv("MAX_RETRIES", "3"))
 
+# Score calculation constants
+MAX_STEPS_MAP = {"easy": 150, "medium": 200, "hard": 300}
+MAX_STEPS = MAX_STEPS_MAP.get(TASK, 200)
+
 # ---------------------------------------------------------------------------
-# Logging helpers  (exact required format)
+# Strict logging helpers — EXACT required format, NO extra output
 # ---------------------------------------------------------------------------
 
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
-def log_step(step: int, action: Any, reward: float, done: bool,
-             error: Optional[str] = None) -> None:
+def log_step(step: int, action: Any, reward: float, done: bool, error: str | None = None) -> None:
     action_str = json.dumps(action) if not isinstance(action, str) else action
-    err_str    = "null" if error is None else json.dumps(error)
+    err_str    = "null" if (error is None or error == "") else json.dumps(str(error))
     done_str   = "true" if done else "false"
     print(
         f"[STEP] step={step} action={action_str} "
@@ -112,15 +117,12 @@ OUTPUT: Respond with ONLY a valid JSON object — no explanation, no markdown.
 
 def build_user_prompt(obs_dict: Dict, step: int, history: List[Dict]) -> str:
     """Construct the user message from the current observation."""
-
-    # Summarise drivers
     idle_drivers = [
         f"  Driver {d['driver_id']}: pos=({d['x']:.3f},{d['y']:.3f})"
         for d in obs_dict.get("drivers", [])
         if d.get("status") == "idle"
     ]
 
-    # Summarise pending orders (sorted by urgency)
     pending_orders = sorted(
         [o for o in obs_dict.get("orders", []) if o.get("status") == "pending"],
         key=lambda o: o.get("steps_until_deadline", 9999),
@@ -134,7 +136,6 @@ def build_user_prompt(obs_dict: Dict, step: int, history: List[Dict]) -> str:
         for o in pending_orders
     ]
 
-    # Recent reward history (last 5 steps)
     recent = history[-5:] if len(history) >= 5 else history
     history_lines = [
         f"  step={h['step']} action={h['action_type']} reward={h['reward']:.2f}"
@@ -164,63 +165,13 @@ def build_user_prompt(obs_dict: Dict, step: int, history: List[Dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# LLM action decision
+# LLM action decision with robust fallback
 # ---------------------------------------------------------------------------
 
-def decide_action(
-    client:   OpenAI,
-    obs_dict: Dict,
-    step:     int,
-    history:  List[Dict],
-) -> Dict:
+def safe_default_action(obs_dict: Dict) -> Dict:
     """
-    Ask the LLM to choose an action.  Falls back to greedy assignment if
-    the LLM response cannot be parsed after MAX_RETRIES attempts.
-    """
-    user_msg = build_user_prompt(obs_dict, step, history)
-
-    for attempt in range(MAX_RETRIES):
-        try:
-            response = client.chat.completions.create(
-                model=MODEL_NAME,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",   "content": user_msg},
-                ],
-                temperature=0.2,
-                max_tokens=512,
-            )
-            raw = response.choices[0].message.content or ""
-            raw = raw.strip()
-
-            # Strip markdown fences if present
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-                raw = raw.strip()
-
-            action = json.loads(raw)
-
-            # Basic validation
-            if "action_type" not in action:
-                raise ValueError("Missing action_type in LLM response")
-
-            return action
-
-        except Exception as exc:
-            if attempt == MAX_RETRIES - 1:
-                # Fall back to greedy on final failure
-                return _greedy_fallback(obs_dict)
-            time.sleep(0.5)
-
-    return _greedy_fallback(obs_dict)
-
-
-def _greedy_fallback(obs_dict: Dict) -> Dict:
-    """
-    Greedy fallback: assign each idle driver to the nearest pending order
-    by pickup distance.  Returns a batch action (or wait if nothing to do).
+    Safe fallback action: greedy nearest-driver assignment or wait.
+    Used when LLM fails or returns invalid JSON.
     """
     idle_drivers = [
         d for d in obs_dict.get("drivers", []) if d.get("status") == "idle"
@@ -266,36 +217,93 @@ def _greedy_fallback(obs_dict: Dict) -> Dict:
     return {"action_type": "batch", "assignments": assignments}
 
 
+def decide_action(
+    client:   OpenAI,
+    obs_dict: Dict,
+    step:     int,
+    history:  List[Dict],
+) -> Dict:
+    """
+    Ask the LLM to choose an action. Falls back to greedy assignment if
+    the LLM response cannot be parsed after MAX_RETRIES attempts.
+    """
+    user_msg = build_user_prompt(obs_dict, step, history)
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": user_msg},
+                ],
+                temperature=0.2,
+                max_tokens=512,
+            )
+            raw = response.choices[0].message.content or ""
+            raw = raw.strip()
+
+            if not raw:
+                raise ValueError("Empty response from LLM")
+
+            # Strip markdown fences if present
+            if raw.startswith("```"):
+                parts = raw.split("```")
+                if len(parts) >= 2:
+                    raw = parts[1]
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                    raw = raw.strip()
+
+            # Find JSON object in response
+            start = raw.find("{")
+            end   = raw.rfind("}") + 1
+            if start >= 0 and end > start:
+                raw = raw[start:end]
+
+            action = json.loads(raw)
+
+            if not isinstance(action, dict):
+                raise ValueError("Response is not a JSON object")
+
+            if "action_type" not in action:
+                raise ValueError("Missing action_type in LLM response")
+
+            valid_types = {"assign", "reject", "wait", "batch"}
+            if action["action_type"] not in valid_types:
+                raise ValueError(f"Invalid action_type: {action['action_type']}")
+
+            return action
+
+        except Exception:
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(0.5)
+
+    return safe_default_action(obs_dict)
+
+
 # ---------------------------------------------------------------------------
-# Score calculator (mirrors server-side logic)
+# Score calculator — normalized to [0, 1] using reward accumulation
 # ---------------------------------------------------------------------------
 
-def compute_score(
-    rewards:         List[float],
-    delivered_all:   int,
-    delivered_on_time: int,
-    failed:          int,
-    total_orders:    int,
-    idle_steps:      int,
-    max_steps:       int,
-) -> float:
-    """Normalised score in [0, 1]."""
-    if total_orders == 0:
+def compute_normalized_score(rewards: List[float], max_steps: int) -> float:
+    """
+    Normalized score in [0, 1] based on total reward accumulated.
+    Uses the formula: score = sum(rewards) / MAX_TOTAL_REWARD
+    where MAX_TOTAL_REWARD is the theoretical maximum achievable reward.
+    """
+    if not rewards:
         return 0.0
 
-    delivery_rate  = delivered_all / total_orders
-    on_time_rate   = delivered_on_time / max(delivered_all, 1)
-    total_reward   = sum(rewards)
-    reward_ceiling = total_orders * 20.0
-    reward_rate    = max(0.0, min(total_reward / max(reward_ceiling, 1), 1.0))
-    idle_ceiling   = max_steps * 10
-    efficiency     = 1.0 - min(idle_steps / max(idle_ceiling, 1), 1.0)
+    total_reward = sum(rewards)
+    MAX_TOTAL_REWARD = max_steps * 10.0  # Conservative upper bound
 
-    score = (0.50 * delivery_rate
-           + 0.25 * on_time_rate
-           + 0.15 * reward_rate
-           + 0.10 * efficiency)
-    return round(max(0.0, min(score, 1.0)), 4)
+    if MAX_TOTAL_REWARD <= 0:
+        return 0.0
+
+    score = total_reward / MAX_TOTAL_REWARD
+
+    return min(max(score, 0.0), 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -304,89 +312,67 @@ def compute_score(
 
 async def run_inference() -> None:
     """Main async entry point."""
-    from food_delivery_openenv import FoodDeliveryAction, FoodDeliveryEnv
+    from models import FoodDeliveryAction
+    from client import FoodDeliveryEnv
+
+    # Tracking variables — defined before try for finally block access
+    all_rewards:  List[float] = []
+    steps_taken:  int         = 0
+    success:      bool        = False
+    score:        float       = 0.0
 
     log_start(task=TASK, env=IMAGE_NAME, model=MODEL_NAME)
 
-    # Initialise OpenAI client
-    client_kwargs: Dict[str, Any] = {"base_url": API_BASE_URL}
-    api_key = os.getenv("OPENAI_API_KEY", HF_TOKEN or "no-key")
-    client_kwargs["api_key"] = api_key
-    llm = OpenAI(**client_kwargs)
+    # Initialise OpenAI-compatible client pointing to HuggingFace router
+    llm = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-    # Tracking
-    all_rewards:      List[float] = []
-    history:          List[Dict]  = []
-    steps_taken:      int         = 0
-    success:          bool        = False
-    score:            float        = 0.0
-    idle_steps_total: int          = 0
-    delivered_all:    int          = 0
-    delivered_ot:     int          = 0
-    failed:           int          = 0
-    total_orders:     int          = 0
-    max_steps:        int          = 200
-
-    env: Optional[FoodDeliveryEnv] = None
+    history:  List[Dict] = []
+    max_steps = MAX_STEPS
+    env: FoodDeliveryEnv | None = None
 
     try:
-        # Connect to environment via Docker
-        env = FoodDeliveryEnv.from_docker_image(IMAGE_NAME)
+        # Connect to environment via Docker image
+        env = await FoodDeliveryEnv.from_docker_image(IMAGE_NAME)
 
-        # Reset
-        reset_result = env.reset()
+        # Reset environment
+        reset_result = await env.reset()
         obs          = reset_result.observation
         obs_dict     = obs.model_dump()
-        max_steps    = obs_dict.get("max_steps", 200)
+        max_steps    = obs_dict.get("max_steps", MAX_STEPS)
 
         done = False
 
-        while not done:
+        while not done and steps_taken < max_steps:
             steps_taken += 1
+            error_msg: str | None = None
 
-            # Ask LLM (with greedy fallback)
+            # Ask LLM (with greedy fallback on failure)
             action_dict = decide_action(llm, obs_dict, steps_taken, history)
             action_type = action_dict.get("action_type", "wait")
-            error_msg: Optional[str] = None
+            reward      = 0.0
 
             try:
-                # Build typed action
+                # Build typed action and step environment
                 action = FoodDeliveryAction(**action_dict)
-                result = env.step(action)
+                result = await env.step(action)
 
                 obs      = result.observation
                 obs_dict = obs.model_dump()
                 reward   = result.reward or 0.0
                 done     = result.done or obs_dict.get("done", False)
 
-                all_rewards.append(reward)
-
-                # Update tracking from obs
-                delivered_all = obs_dict.get("num_delivered_orders", delivered_all)
-                failed        = obs_dict.get("num_failed_orders", failed)
-                meta          = obs_dict.get("metadata", {})
-                delivered_ot  = meta.get("delivered_on_time", delivered_ot)
-                total_orders  = len(obs_dict.get("orders", []))
-
-                # Count idle driver steps this step
-                idle_this_step = obs_dict.get("num_idle_drivers", 0)
-                idle_steps_total += idle_this_step
-
+                # Collect error from invalid actions
                 if not obs_dict.get("last_action_valid", True):
                     error_msg = obs_dict.get("last_action_message", "invalid action")
 
             except Exception as exc:
                 error_msg = str(exc)
                 reward    = 0.0
-                all_rewards.append(reward)
+                done      = False
 
-            # Append to history
-            history.append({
-                "step":        steps_taken,
-                "action_type": action_type,
-                "reward":      reward,
-            })
+            all_rewards.append(reward)
 
+            # Log step in EXACT required format
             log_step(
                 step   = steps_taken,
                 action = action_dict,
@@ -395,34 +381,32 @@ async def run_inference() -> None:
                 error  = error_msg,
             )
 
-            # Safety: respect max_steps even if done flag is delayed
-            if steps_taken >= max_steps:
-                break
+            # Update history for prompt context
+            history.append({
+                "step":        steps_taken,
+                "action_type": action_type,
+                "reward":      reward,
+            })
 
-        # Compute final score
-        score = compute_score(
-            rewards           = all_rewards,
-            delivered_all     = delivered_all,
-            delivered_on_time = delivered_ot,
-            failed            = failed,
-            total_orders      = total_orders,
-            idle_steps        = idle_steps_total,
-            max_steps         = max_steps,
-        )
-        success = True
+        # Compute normalized score in [0, 1]
+        score   = compute_normalized_score(all_rewards, max_steps)
+        success = score > 0.0
 
     except Exception as exc:
-        error_detail = traceback.format_exc()
-        print(f"[ERROR] {exc}\n{error_detail}", file=sys.stderr, flush=True)
+        # Log to stderr only — stdout reserved for strict format
+        print(f"[ERROR] {exc}\n{traceback.format_exc()}", file=sys.stderr, flush=True)
         success = False
+        score   = compute_normalized_score(all_rewards, max_steps)
 
     finally:
+        # Always close environment
         if env is not None:
             try:
-                env.close()
+                await env.close()
             except Exception:
                 pass
 
+        # ALWAYS print [END] — even on crash
         log_end(
             success = success,
             steps   = steps_taken,
