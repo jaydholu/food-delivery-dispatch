@@ -1,7 +1,8 @@
 """
 MEDIUM task — 4 drivers, 8 orders, with traffic congestion zones.
 
-Traffic zones introduce stochastic travel-time variation that requires the agent to reason about route feasibility beyond pure distance.
+Traffic zones introduce stochastic travel-time variation that requires the
+agent to reason about route feasibility beyond pure distance.
 Expected baseline score: 0.55–0.70.
 """
 
@@ -10,35 +11,27 @@ from __future__ import annotations
 from typing import Any
 import numpy as np
 
-from environment.environment import FoodDeliveryEnv
-from environment.models import EnvironmentConfig
-from environment.reward import RewardConfig
-from tasks.grader import EpisodeResult, format_grade_report, grade_episode
-
-
-# ---------------------------------------------------------------------------
-# Task configuration
-# ---------------------------------------------------------------------------
-
-MEDIUM_CONFIG = EnvironmentConfig(
-    num_drivers=4,
-    num_orders=8,
-    max_steps=200,
-    map_size=1.0,
-    order_deadline_min=30,
-    order_deadline_max=80,
-    enable_traffic=True,
-    dynamic_orders=False,
-    seed=1,
+from models import EpisodeResult
+from server.food_delivery_openenv_environment import (
+    MEDIUM_CONFIG,
+    DriverStatus,
+    EnvConfig,
+    FoodDeliveryEnvironment,
+    RewardWeights,
 )
+from tasks.grader import format_grade_report, grade_episode
 
-MEDIUM_REWARD_CONFIG = RewardConfig(
+# ---------------------------------------------------------------------------
+# Task reward weights
+# ---------------------------------------------------------------------------
+
+MEDIUM_REWARD_CONFIG = RewardWeights(
     delivery_success=10.0,
-    early_bonus=5.0,
-    late_penalty=2.5,
-    idle_penalty=0.1,
+    early_bonus_max=5.0,
+    late_penalty_per_step=2.5,
+    idle_penalty_base=0.1,
     inefficiency_penalty=0.5,
-    order_failure_penalty=8.0,
+    order_failure=8.0,
     assignment_reward=0.5,
     pickup_reward=1.0,
 )
@@ -48,17 +41,16 @@ MEDIUM_REWARD_CONFIG = RewardConfig(
 # Task factory
 # ---------------------------------------------------------------------------
 
-def make_medium_env() -> FoodDeliveryEnv:
+def make_medium_env() -> FoodDeliveryEnvironment:
     """
     Construct and return the MEDIUM task environment.
 
     Returns:
-        Configured FoodDeliveryEnv instance.
+        Configured FoodDeliveryEnvironment instance.
     """
-    return FoodDeliveryEnv(
-        config=MEDIUM_CONFIG,
-        reward_config=MEDIUM_REWARD_CONFIG
-    )
+    env = FoodDeliveryEnvironment(task="medium")
+    env._rwt = MEDIUM_REWARD_CONFIG
+    return env
 
 
 # ---------------------------------------------------------------------------
@@ -74,8 +66,12 @@ def grade_medium(
     """
     Evaluate a policy on the MEDIUM task over multiple episodes.
 
+    The policy receives the raw FoodDeliveryObservation returned by the
+    environment and the environment instance itself, and must return a
+    FoodDeliveryAction (or a dict that can be passed to env.step).
+
     Args:
-        policy_fn:    Callable(observation, env) → int action.
+        policy_fn:    Callable(observation, env) → FoodDeliveryAction.
         num_episodes: Number of evaluation episodes.
         seed_offset:  Shift seeds for independent evaluation runs.
         verbose:      Print per-episode reports.
@@ -84,31 +80,42 @@ def grade_medium(
         mean_score: Average normalised score across episodes.
         results:    List of EpisodeResult dataclasses.
     """
-    env = make_medium_env()
     scores: list[float] = []
     all_results: list[EpisodeResult] = []
 
     for ep in range(num_episodes):
-        obs, _ = env.reset(seed=seed_offset + ep)
+        env = make_medium_env()
+        env._cfg = EnvConfig(
+            num_drivers=MEDIUM_CONFIG.num_drivers,
+            num_orders=MEDIUM_CONFIG.num_orders,
+            max_steps=MEDIUM_CONFIG.max_steps,
+            order_deadline_min=MEDIUM_CONFIG.order_deadline_min,
+            order_deadline_max=MEDIUM_CONFIG.order_deadline_max,
+            enable_traffic=MEDIUM_CONFIG.enable_traffic,
+            dynamic_orders=MEDIUM_CONFIG.dynamic_orders,
+            seed=seed_offset + ep,
+        )
+
+        obs = env.reset()
         total_reward = 0.0
         idle_steps = 0
         done = False
 
         while not done:
             action = policy_fn(obs, env)
-            obs, reward, terminated, truncated, _ = env.step(action)
-            total_reward += reward
+            obs = env.step(action)
+            total_reward += obs.last_reward
             idle_steps += sum(
-                1 for d in env.drivers if d.status.value == "idle"
+                1 for d in env._drivers if d.status == DriverStatus.IDLE
             )
-            done = terminated or truncated
+            done = obs.done
 
         score, result = grade_episode(
-            orders=env.orders,
+            orders=env._orders,
             total_reward=total_reward,
-            total_steps=env.current_step,
+            total_steps=env._current_step,
             idle_driver_steps=idle_steps,
-            max_steps=MEDIUM_CONFIG.max_steps,
+            max_steps=env._cfg.max_steps,
         )
         scores.append(score)
         all_results.append(result)

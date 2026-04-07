@@ -6,12 +6,17 @@ The returned score in [0.0, 1.0] is the canonical hackathon metric.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
-from environment.models import Order, OrderStatus, EpisodeResult
 
+from models import EpisodeResult
+from server.food_delivery_openenv_environment import Order, OrderStatus
 
-
-def grade_episode(orders: list[Order], total_reward: float, total_steps: int, idle_driver_steps: int, max_steps: int) -> tuple[float, EpisodeResult]:
+def grade_episode(
+    orders: list[Order],
+    total_reward: float,
+    total_steps: int,
+    idle_driver_steps: int,
+    max_steps: int,
+) -> tuple[float, EpisodeResult]:
     """
     Compute the normalised score ∈ [0.0, 1.0] for a completed episode.
 
@@ -29,7 +34,7 @@ def grade_episode(orders: list[Order], total_reward: float, total_steps: int, id
         total_reward:      Cumulative reward over the episode.
         total_steps:       Total environment steps taken.
         idle_driver_steps: Sum of idle steps across all drivers.
-        max_steps:         Episode step limit from EnvironmentConfig.
+        max_steps:         Episode step limit from EnvConfig.
 
     Returns:
         score:  Float in [0.0, 1.0].

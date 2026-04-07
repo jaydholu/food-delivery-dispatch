@@ -1,8 +1,10 @@
 """
 HARD task — 6 drivers, 15 initial orders, traffic + dynamic order spawning.
 
-Dynamic spawning means the agent must continuously balance in-progress deliveries against newly arriving demand.
-This is the most realistic and challenging configuration; the greedy nearest-driver baseline scores ~0.81.
+Dynamic spawning means the agent must continuously balance in-progress
+deliveries against newly arriving demand.
+This is the most realistic and challenging configuration; the greedy
+nearest-driver baseline scores ~0.81.
 """
 
 from __future__ import annotations
@@ -10,41 +12,31 @@ from __future__ import annotations
 from typing import Any
 import numpy as np
 
-from environment.environment import FoodDeliveryEnv
-from environment.models import EnvironmentConfig
-from environment.reward import RewardConfig
-from tasks.grader import EpisodeResult, format_grade_report, grade_episode
-
-
-# ---------------------------------------------------------------------------
-# Task configuration
-# ---------------------------------------------------------------------------
-
-HARD_CONFIG = EnvironmentConfig(
-    num_drivers=6,
-    num_orders=15,
-    max_steps=300,
-    map_size=1.0,
-    order_deadline_min=25,
-    order_deadline_max=70,
-    enable_traffic=True,
-    dynamic_orders=True,
-    dynamic_order_rate=0.12,
-    max_total_orders=30,
-    seed=2,
+from models import EpisodeResult
+from server.food_delivery_openenv_environment import (
+    HARD_CONFIG,
+    DriverStatus,
+    EnvConfig,
+    FoodDeliveryEnvironment,
+    RewardWeights,
 )
+from tasks.grader import format_grade_report, grade_episode
 
-HARD_REWARD_CONFIG = RewardConfig(
+# ---------------------------------------------------------------------------
+# Task reward weights
+# ---------------------------------------------------------------------------
+
+HARD_REWARD_CONFIG = RewardWeights(
     delivery_success=10.0,
-    early_bonus=4.0,
-    late_penalty=3.0,
-    idle_penalty=0.15,
+    early_bonus_max=4.0,
+    early_threshold=8,
+    late_penalty_per_step=3.0,
+    idle_penalty_base=0.15,
     inefficiency_penalty=0.6,
-    order_failure_penalty=9.0,
+    order_failure=9.0,
     assignment_reward=0.5,
     pickup_reward=1.0,
-    early_threshold=8,
-    max_idle_penalty=2.5,
+    idle_penalty_cap=2.5,
 )
 
 
@@ -52,17 +44,16 @@ HARD_REWARD_CONFIG = RewardConfig(
 # Task factory
 # ---------------------------------------------------------------------------
 
-def make_hard_env() -> FoodDeliveryEnv:
+def make_hard_env() -> FoodDeliveryEnvironment:
     """
     Construct and return the HARD task environment.
 
     Returns:
-        Configured FoodDeliveryEnv instance.
+        Configured FoodDeliveryEnvironment instance.
     """
-    return FoodDeliveryEnv(
-        config=HARD_CONFIG,
-        reward_config=HARD_REWARD_CONFIG
-    )
+    env = FoodDeliveryEnvironment(task="hard")
+    env._rwt = HARD_REWARD_CONFIG
+    return env
 
 
 # ---------------------------------------------------------------------------
@@ -78,8 +69,12 @@ def grade_hard(
     """
     Evaluate a policy on the HARD task over multiple episodes.
 
+    The policy receives the raw FoodDeliveryObservation returned by the
+    environment and the environment instance itself, and must return a
+    FoodDeliveryAction (or a dict that can be passed to env.step).
+
     Args:
-        policy_fn:    Callable(observation, env) → int action.
+        policy_fn:    Callable(observation, env) → FoodDeliveryAction.
         num_episodes: Number of evaluation episodes.
         seed_offset:  Shift seeds for independent evaluation runs.
         verbose:      Print per-episode reports.
@@ -88,29 +83,44 @@ def grade_hard(
         mean_score: Average normalised score across episodes.
         results:    List of EpisodeResult dataclasses.
     """
-    env = make_hard_env()
     scores: list[float] = []
     all_results: list[EpisodeResult] = []
 
     for ep in range(num_episodes):
-        obs, _ = env.reset(seed=seed_offset + ep)
+        env = make_hard_env()
+        env._cfg = EnvConfig(
+            num_drivers=HARD_CONFIG.num_drivers,
+            num_orders=HARD_CONFIG.num_orders,
+            max_steps=HARD_CONFIG.max_steps,
+            order_deadline_min=HARD_CONFIG.order_deadline_min,
+            order_deadline_max=HARD_CONFIG.order_deadline_max,
+            enable_traffic=HARD_CONFIG.enable_traffic,
+            dynamic_orders=HARD_CONFIG.dynamic_orders,
+            dynamic_order_rate=HARD_CONFIG.dynamic_order_rate,
+            max_total_orders=HARD_CONFIG.max_total_orders,
+            seed=seed_offset + ep,
+        )
+
+        obs = env.reset()
         total_reward = 0.0
         idle_steps = 0
         done = False
 
         while not done:
             action = policy_fn(obs, env)
-            obs, reward, terminated, truncated, _ = env.step(action)
-            total_reward += reward
-            idle_steps += sum(1 for d in env.drivers if d.status.value == "idle")
-            done = terminated or truncated
+            obs = env.step(action)
+            total_reward += obs.last_reward
+            idle_steps += sum(
+                1 for d in env._drivers if d.status == DriverStatus.IDLE
+            )
+            done = obs.done
 
         score, result = grade_episode(
-            orders=env.orders,
+            orders=env._orders,
             total_reward=total_reward,
-            total_steps=env.current_step,
+            total_steps=env._current_step,
             idle_driver_steps=idle_steps,
-            max_steps=HARD_CONFIG.max_steps,
+            max_steps=env._cfg.max_steps,
         )
         scores.append(score)
         all_results.append(result)
