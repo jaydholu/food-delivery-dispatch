@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openenv-food_delivery_openenv"
+version = "1.0.0"
+description = "Food Delivery Dispatch RL Environment for OpenEnv"
+requires-python = ">=3.10"
+dependencies = [
+    # OpenEnv core runtime (FastAPI server + WebSocket client + types)
+    "openenv-core[core]>=0.2.2",
+    # ASGI server
+    "uvicorn[standard]>=0.35.0",
+    # Data validation (already a transitive dep of openenv-core)
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+]
+inference = [
+    # Only needed for inference.py (LLM agent)
+    "openai>=1.30.0",
+]
+
+[project.scripts]
+server = "food_delivery_openenv.server.app:main"
+
+[tool.setuptools]
+include-package-data = true
+packages = [
+    "food_delivery_openenv",
+    "food_delivery_openenv.server",
+]
+package-dir = {
+    "food_delivery_openenv"        = ".",
+    "food_delivery_openenv.server" = "server",
+}

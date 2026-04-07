@@ -1,0 +1,13 @@
+# Food Delivery Dispatch — OpenEnv runtime dependencies
+
+# Core OpenEnv runtime (FastAPI server + WebSocket + types)
+openenv-core[core]>=0.2.2
+
+# ASGI server
+uvicorn[standard]>=0.35.0
+
+# Data validation
+pydantic>=2.0.0
+
+# Inference agent (LLM-based; only needed for inference.py)
+openai>=1.30.0

@@ -1,0 +1,41 @@
+spec_version: 1
+name: food_delivery_openenv
+type: space
+runtime: fastapi
+app: server.app:app
+port: 8000
+
+# Web interface configuration (enabled for Hugging Face Spaces)
+web_interface:
+  enabled: true
+  base_path: /web
+  title: "Food Delivery Dispatch — RL Environment"
+  description: >
+    Multi-driver, multi-order food delivery dispatch simulation.
+    An RL agent (or LLM) acts as the dispatch controller, assigning orders
+    to drivers to maximise delivery success, minimise lateness and idle time.
+
+# Environment metadata
+metadata:
+  task_tiers:
+    - easy:   "2 drivers, 3 orders, no traffic"
+    - medium: "4 drivers, 8 orders, with traffic"
+    - hard:   "6 drivers, 15 orders, traffic + dynamic spawning"
+
+  action_types:
+    - assign: "Assign a specific driver to a specific pending order"
+    - reject: "Cancel a pending order (incurs a penalty)"
+    - wait:   "Do nothing this step (no-op)"
+    - batch:  "Assign multiple driver-order pairs simultaneously"
+
+  reward:
+    delivery_success: +10.0
+    early_bonus:      "up to +5.0"
+    late_penalty:     "-2.0 per step late"
+    order_failure:    -8.0
+    idle_penalty:     "-0.1 to -2.0 per driver per step"
+    assignment:       +0.5
+    pickup:           +1.0
+
+  score_formula: >
+    score = 0.50 * delivery_rate + 0.25 * on_time_rate + 0.15 * reward_rate   + 0.10 * efficiency_rate
