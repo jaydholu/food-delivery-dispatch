@@ -1,17 +1,3 @@
----
-title: Food Delivery Dispatch — OpenEnv RL Environment
-colorFrom: yellow
-colorTo: red
-sdk: docker
-pinned: false
-app_port: 8000
-base_path: /web
-tags:
-  - openenv
-  - reinforcement-learning
-  - dispatch-optimization
----
-
 # Food Delivery Dispatch — OpenEnv RL Environment
 
 [![OpenEnv](https://img.shields.io/badge/OpenEnv-Compliant-orange)](https://openenv.dev)
@@ -19,7 +5,7 @@ tags:
 [![License](https://img.shields.io/badge/License-MIT-lightgrey)](LICENSE)
 
 > A **production-grade reinforcement learning environment** for multi-driver food delivery dispatch optimisation.  
-> Built with **pure OpenEnv APIs** — zero Gymnasium / numpy dependencies.  
+> Built with **pure OpenEnv APIs**.  
 > An LLM or RL agent acts as the **dispatch controller**, assigning orders to drivers to maximise throughput.
 
 ---
@@ -54,21 +40,16 @@ food_delivery_openenv/
 │   ├── hard.py                               ← 6 drivers, 15 orders + traffic + dynamic spawning
 │   ├── grader.py                             ← Scoring formula shared by all tasks
 │   └── __init__.py
-├── training/
-│   ├── train_ppo.py                          ← PPO training with Stable-Baselines3
-│   ├── train_all_tasks.py                    ← PPO training for tasks
-│   └── evaluate_ppo.py                       ← PPO evaluation + greedy baseline comparison
 ├── __init__.py                               ← Package exports
 ├── client.py                                 ← FoodDeliveryEnv client (WebSocket)
 ├── Dockerfile                                ← Production container
-├── inference.py                              ← LLM agent inference script
+├── inference.py                              ← LLM agent inference script (HuggingFace router)
 ├── models.py                                 ← Action & Observation (pure OpenEnv)
 ├── openenv.yaml                              ← OpenEnv manifest
 ├── pyproject.toml                            ← Build config & dependencies
 ├── .gitignore                                ← git ignore files
 ├── requirements.txt                          ← Runtime dependencies
-├── runtime.txt                               ← Python verison
-└── uv.lock                             
+└── runtime.txt                               ← Python version
 ```
 
 ---
@@ -90,7 +71,7 @@ reset()
   │
   ▼
 step(action)
-  ├─ 1. Decode and apply dispatch action
+  ├─ 1. Decode and apply dispatch action (with safety validation)
   ├─ 2. Move all active drivers toward their targets
   ├─ 3. Resolve pickups  (PICKING_UP → DELIVERING + pickup_reward)
   ├─ 4. Resolve deliveries (DELIVERING → IDLE + delivery_reward)
@@ -126,7 +107,10 @@ FoodDeliveryAction(action_type="reject", order_id=7)
 FoodDeliveryAction(action_type="wait")
 ```
 
-Invalid actions (driver not idle, order not pending) return `last_action_valid=False` in the observation — the environment **never crashes** on a bad action.
+**Safety guarantees:**
+- Invalid actions (wrong IDs, wrong status) apply a small penalty but **never crash** the environment
+- Repeated useless waits (when work is available) incur a growing penalty
+- All observations contain only plain Python types — fully JSON serializable
 
 ---
 
@@ -193,6 +177,8 @@ Dense reward signal — feedback at every step, not just at delivery:
 | Order expired (deadline missed) | `−8.0` |
 | Order rejected | `−1.0` |
 | Idle driver per step | `−0.1 … −2.0` (grows with idle duration) |
+| Invalid action (bad IDs, wrong status) | `−0.2` |
+| Useless wait (idle drivers + pending orders) | `−0.05 × consecutive_waits` |
 
 ### Normalised Score Formula
 
@@ -246,13 +232,28 @@ open http://localhost:8000/web
 
 ---
 
-## Run Inference (LLM Agent)
+## Run Inference (LLM Agent via HuggingFace Router)
+
+The inference script uses the **HuggingFace router** API (not OpenAI directly).
+
+### Required Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HF_TOKEN` | HuggingFace API token (primary) | — |
+| `API_KEY` | Alternative API key | — |
+| `API_BASE_URL` | API endpoint | `https://router.huggingface.co/v1` |
+| `MODEL_NAME` | LLM model identifier | `Qwen/Qwen2.5-72B-Instruct` |
+| `IMAGE_NAME` | Docker image name | `food_delivery_openenv-env:latest` |
+| `TASK` | Task difficulty: `easy`, `medium`, `hard` | `medium` |
+| `MAX_RETRIES` | LLM retry attempts on failure | `3` |
+
+### Run Inference
 
 ```bash
-# Set environment variables
-export API_BASE_URL="https://api.openai.com/v1"   # or HF Inference endpoint
-export MODEL_NAME="gpt-4o-mini"
-export OPENAI_API_KEY="sk-..."
+# Set required environment variables
+export HF_TOKEN="hf_your_token_here"
+export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
 export IMAGE_NAME="food_delivery_openenv-env:latest"
 export TASK="medium"
 
@@ -260,23 +261,40 @@ export TASK="medium"
 python inference.py
 ```
 
-Expected output:
+### Example Output (Strict Format)
+
+The script produces **exactly** this format — no extra logs allowed:
 
 ```
-[START] task=medium env=food_delivery_openenv-env:latest model=gpt-4o-mini
-[STEP] step=1 action={"action_type":"batch","assignments":[{"driver_id":0,"order_id":2},...]} reward=0.38 done=false error=null
-[STEP] step=2 action={"action_type":"wait"} reward=-0.40 done=false error=null
+[START] task=medium env=food_delivery_openenv-env:latest model=Qwen/Qwen2.5-72B-Instruct
+[STEP] step=1 action={"action_type": "batch", "assignments": [{"driver_id": 0, "order_id": 2}, {"driver_id": 1, "order_id": 5}]} reward=0.38 done=false error=null
+[STEP] step=2 action={"action_type": "wait"} reward=-0.10 done=false error=null
+[STEP] step=3 action={"action_type": "assign", "driver_id": 2, "order_id": 3} reward=0.42 done=false error=null
 ...
-[END] success=true steps=87 score=0.7812 rewards=[0.38,-0.40,...]
+[STEP] step=87 action={"action_type": "wait"} reward=0.00 done=true error=null
+[END] success=true steps=87 score=0.7812 rewards=[0.38, -0.10, 0.42, ...]
 ```
 
-### Custom LLM / HuggingFace Inference
+### Robustness Features
+
+- **Always prints `[END]`** — even if the environment crashes or the LLM fails
+- **Greedy fallback** — if LLM returns invalid JSON, uses nearest-driver heuristic
+- **Invalid action safety** — bad driver/order IDs apply a penalty but never crash
+- **Score normalization** — score is always clamped to `[0.0, 1.0]`
+- **No OpenAI dependency** — uses HuggingFace router exclusively
+
+### Custom Model / Endpoint
 
 ```bash
-export API_BASE_URL="https://api-inference.huggingface.co/models/meta-llama/Llama-3.1-8B-Instruct/v1"
+# Use a different HuggingFace model
 export MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
 export HF_TOKEN="hf_..."
-export OPENAI_API_KEY="hf_..."   # same as HF_TOKEN for HF endpoints
+python inference.py
+
+# Use a custom OpenAI-compatible endpoint
+export API_BASE_URL="https://your-endpoint.com/v1"
+export API_KEY="your-key"
+export MODEL_NAME="your-model"
 python inference.py
 ```
 
