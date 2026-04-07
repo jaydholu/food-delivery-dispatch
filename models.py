@@ -8,6 +8,7 @@ Observation: FoodDeliveryObservation — full environment snapshot (no numpy)
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal
+from dataclasses import dataclass
 
 from openenv.core.env_server.types import Action, Observation
 from pydantic import Field
@@ -151,3 +152,14 @@ class FoodDeliveryObservation(Observation):
     done: bool = Field(default=False)
     reward: float = Field(default=0.0)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+@dataclass
+class EpisodeResult:
+    total_orders: int
+    delivered_on_time: int
+    delivered_late: int
+    failed: int
+    total_reward: float
+    total_steps: int
+    idle_driver_steps: int
