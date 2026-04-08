@@ -1,3 +1,13 @@
+---
+title: Food Delivery Dispatch
+emoji: 🚚
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_file: app.py
+pinned: false
+
+---
 # Food Delivery Dispatch — OpenEnv RL Environment
 
 [![OpenEnv](https://img.shields.io/badge/OpenEnv-Compliant-orange)](https://openenv.dev)
@@ -175,10 +185,7 @@ The key behavioral problem in LLM agents is **wait-spamming**: choosing `"wait"`
 ### Normalised Score Formula
 
 ```
-score = 0.50 × delivery_rate
-      + 0.25 × on_time_rate
-      + 0.15 × reward_rate
-      + 0.10 × efficiency_rate
+score = 0.50 × delivery_rate + 0.25 × on_time_rate + 0.15 × reward_rate + 0.10 × efficiency_rate
 
 Where:
   delivery_rate   = delivered / total_orders
