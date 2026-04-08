@@ -182,8 +182,8 @@ def build_user_prompt(obs_dict: Dict, step: int, history: List[Dict]) -> str:
     # Format pending orders with urgency info
     pending_lines = []
     for o in pending_orders:
-        urgency = "🔴 URGENT" if o.get("steps_until_deadline", 999) < 20 else (
-                  "🟡 SOON" if o.get("steps_until_deadline", 999) < 40 else "🟢 OK"
+        urgency = "URGENT" if o.get("steps_until_deadline", 999) < 20 else (
+                  "SOON" if o.get("steps_until_deadline", 999) < 40 else "OK"
         )
         pending_lines.append(
             f"  • Order {o['order_id']} [{urgency}]: "
@@ -226,14 +226,14 @@ def build_user_prompt(obs_dict: Dict, step: int, history: List[Dict]) -> str:
                 f"(deadline in {most_urgent.get('steps_until_deadline', '?')} steps)"
             )
     elif not idle_drivers:
-        guidance = "✅ All drivers busy — wait is acceptable."
+        guidance = "All drivers busy — wait is acceptable."
     elif not pending_orders:
-        guidance = "✅ No pending orders — wait is acceptable."
+        guidance = "No pending orders — wait is acceptable."
     else:
         guidance = "Consider your options carefully."
 
     if recent_waits >= 2:
-        guidance += f"\n  ⚠️  WARNING: {recent_waits} recent waits detected — penalties are compounding!"
+        guidance += f"\n   WARNING: {recent_waits} recent waits detected — penalties are compounding!"
 
     lines = [
         f"╔═══ STEP {step} / {obs_dict.get('max_steps', '?')} ═══╗",
