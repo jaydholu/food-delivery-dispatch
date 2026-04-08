@@ -71,9 +71,10 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
     rewards_str = json.dumps([round(r, 4) for r in rewards])
     succ_str    = "true" if success else "false"
     print(
-        f"[END] success={succ_str} steps={steps} "
+        f"[END] success={succ_str} steps={steps}"
         f"score={score:.4f} rewards={rewards_str}",
         flush=True,
+        end="\n\n",
     )
 
 
@@ -86,7 +87,7 @@ SYSTEM_PROMPT = """You are an expert food delivery dispatch controller managing 
 CRITICAL MISSION: Maximize completed on-time deliveries. Every idle moment costs you points.
 
 ═══════════════════════════════════════════════════════
-⚠️  WARNING: WAITING IS EXPENSIVE
+WARNING: WAITING IS EXPENSIVE
 ═══════════════════════════════════════════════════════
 - Each useless "wait" when drivers and orders are available incurs PENALTIES
 - Consecutive waits compound: after 3 waits in a row, penalties DOUBLE
@@ -134,12 +135,12 @@ STEP 4 — Batch all possible assignments in one action:
 ═══════════════════════════════════════════════════════
 WHAT TO AVOID (these hurt your score):
 ═══════════════════════════════════════════════════════
-✗ Waiting when idle drivers + pending orders exist
-✗ Using "wait" repeatedly (penalties compound)
-✗ Assigning a driver that is not "idle"
-✗ Assigning an order that is not "pending"  
-✗ Using IDs that don't exist in the observation
-✗ Leaving urgent orders unassigned until deadline
+1. Waiting when idle drivers + pending orders exist
+2. Using "wait" repeatedly (penalties compound)
+3. Assigning a driver that is not "idle"
+4. Assigning an order that is not "pending"
+5. Using IDs that don't exist in the observation
+6. Leaving urgent orders unassigned until deadline
 
 ═══════════════════════════════════════════════════════
 OUTPUT FORMAT:
@@ -266,7 +267,6 @@ def build_user_prompt(obs_dict: Dict, step: int, history: List[Dict]) -> str:
 
     lines += ["", "RECENT HISTORY:"]
     lines += history_lines if history_lines else ["  (no history yet)"]
-
     lines += ["", "╚═══ DECIDE NOW — return ONLY a JSON action ═══╝"]
 
     return "\n".join(lines)
@@ -317,21 +317,18 @@ def safe_default_action(obs_dict: Dict) -> Dict:
 
     if not assignments:
         return {"action_type": "wait"}
+    
     if len(assignments) == 1:
         return {
             "action_type": "assign",
             "driver_id": assignments[0]["driver_id"],
             "order_id": assignments[0]["order_id"],
         }
+    
     return {"action_type": "batch", "assignments": assignments}
 
 
-def decide_action(
-    client: OpenAI,
-    obs_dict: Dict,
-    step: int,
-    history: List[Dict],
-) -> Dict:
+def decide_action(client: OpenAI, obs_dict: Dict, step: int, history: List[Dict]) -> Dict:
     """
     Ask the LLM to choose an action.
 
@@ -428,95 +425,113 @@ def compute_normalized_score(rewards: List[float], max_steps: int) -> float:
 # ---------------------------------------------------------------------------
 
 async def run_inference() -> None:
-    """Main async entry point."""
+    """Main async entry point — runs easy, medium, and hard tasks in sequence."""
     from models import FoodDeliveryAction
     from client import FoodDeliveryEnv
 
-    all_rewards: List[float] = []
-    steps_taken: int = 0
-    success: bool = False
-    score: float = 0.0
-
-    log_start(task=TASK, env=IMAGE_NAME, model=MODEL_NAME)
+    # ── run all three tasks instead of a single task ──────────────────
+    TASKS = ["easy", "medium", "hard"]
 
     llm = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
-    history: List[Dict] = []
-    max_steps = MAX_STEPS
-    env: FoodDeliveryEnv | None = None
+    task_scores: List[float] = []
 
-    try:
-        env = await FoodDeliveryEnv.from_docker_image(IMAGE_NAME)
+    for task in TASKS:
 
-        reset_result = await env.reset()
-        obs = reset_result.observation
-        obs_dict = obs.model_dump()
-        max_steps = obs_dict.get("max_steps", MAX_STEPS)
+        max_steps = MAX_STEPS_MAP.get(task, 200)
 
-        done = False
+        # Per-task state — fully reset for each iteration
+        all_rewards: List[float] = []
+        steps_taken: int = 0
+        success: bool = False
+        score: float = 0.0
+        history: List[Dict] = []
+        env: FoodDeliveryEnv | None = None
 
-        while not done and steps_taken < max_steps:
-            steps_taken += 1
-            error_msg: str | None = None
+        log_start(task=task, env=IMAGE_NAME, model=MODEL_NAME)
 
-            action_dict = decide_action(llm, obs_dict, steps_taken, history)
-            action_type = action_dict.get("action_type", "wait")
-            reward = 0.0
-
-            try:
-                action = FoodDeliveryAction(**action_dict)
-                result = await env.step(action)
-
-                obs = result.observation
-                obs_dict = obs.model_dump()
-                reward = result.reward or 0.0
-                done = result.done or obs_dict.get("done", False)
-
-                if not obs_dict.get("last_action_valid", True):
-                    error_msg = obs_dict.get("last_action_message", "invalid action")
-
-            except Exception as exc:
-                error_msg = str(exc)
-                reward = 0.0
-                done = False
-
-            all_rewards.append(reward)
-
-            log_step(
-                step=steps_taken,
-                action=action_dict,
-                reward=reward,
-                done=done,
-                error=error_msg,
+        try:
+            env = await FoodDeliveryEnv.from_docker_image(
+                IMAGE_NAME,
+                env_vars={"FOOD_DELIVERY_TASK": task},
             )
 
-            history.append({
-                "step": steps_taken,
-                "action_type": action_type,
-                "reward": reward,
-            })
+            reset_result = await env.reset()
+            obs = reset_result.observation
+            obs_dict = obs.model_dump()
+            max_steps = obs_dict.get("max_steps", max_steps)
 
-        score = compute_normalized_score(all_rewards, max_steps)
-        success = score > 0.0
+            done = False
 
-    except Exception as exc:
-        print(f"[ERROR] {exc}\n{traceback.format_exc()}", file=sys.stderr, flush=True)
-        success = False
-        score = compute_normalized_score(all_rewards, max_steps)
+            while not done and steps_taken < max_steps:
+                steps_taken += 1
+                error_msg: str | None = None
 
-    finally:
-        if env is not None:
-            try:
-                await env.close()
-            except Exception:
-                pass
+                action_dict = decide_action(llm, obs_dict, steps_taken, history)
+                action_type = action_dict.get("action_type", "wait")
+                reward = 0.0
 
-        log_end(
-            success=success,
-            steps=steps_taken,
-            score=score,
-            rewards=all_rewards,
-        )
+                try:
+                    action = FoodDeliveryAction(**action_dict)
+                    result = await env.step(action)
+
+                    obs = result.observation
+                    obs_dict = obs.model_dump()
+                    reward = result.reward or 0.0
+                    done = result.done or obs_dict.get("done", False)
+
+                    if not obs_dict.get("last_action_valid", True):
+                        error_msg = obs_dict.get("last_action_message", "invalid action")
+
+                except Exception as exc:
+                    error_msg = str(exc)
+                    reward = 0.0
+                    done = False
+
+                all_rewards.append(reward)
+
+                log_step(
+                    step=steps_taken,
+                    action=action_dict,
+                    reward=reward,
+                    done=done,
+                    error=error_msg,
+                )
+
+                history.append({
+                    "step": steps_taken,
+                    "action_type": action_type,
+                    "reward": reward,
+                })
+
+            score = compute_normalized_score(all_rewards, max_steps)
+            success = score > 0.0
+
+        except Exception as exc:
+            print(f"[ERROR] task={task} {exc}\n{traceback.format_exc()}", file=sys.stderr, flush=True)
+            success = False
+            score = compute_normalized_score(all_rewards, max_steps)
+
+        finally:
+            if env is not None:
+                try:
+                    await env.close()
+                except Exception:
+                    pass
+
+            log_end(
+                success=success,
+                steps=steps_taken,
+                score=score,
+                rewards=all_rewards,
+            )
+
+        task_scores.append(score)
+
+    # ── print average score across all tasks ───────────────────────────
+    if task_scores:
+        avg_score = sum(task_scores) / len(task_scores)
+        print(f"[FINAL] avg_score = {avg_score:.4f}", flush=True)
 
 
 # ---------------------------------------------------------------------------
