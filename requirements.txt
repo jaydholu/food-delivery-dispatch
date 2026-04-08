@@ -1,4 +1,4 @@
-# Food Delivery Dispatch — OpenEnv runtime dependencies
+# Food Delivery Dispatch - OpenEnv runtime dependencies
 
 # Core OpenEnv runtime (FastAPI server + WebSocket + types)
 openenv-core[core]>=0.2.2
