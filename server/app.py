@@ -2,13 +2,13 @@
 FastAPI application for the Food Delivery Dispatch OpenEnv Environment.
 
 Endpoints (OpenEnv spec):
-    POST /reset      → FoodDeliveryObservation (initial state)
-    POST /step       → FoodDeliveryObservation (next state)
-    GET  /state      → episode_id + step_count
-    GET  /schema     → action / observation schemas
-    WS   /ws         → WebSocket persistent session
-    GET  /web        → Interactive Web UI
-    GET  /health     → { status: "ok" }
+    POST /reset       FoodDeliveryObservation (initial state)
+    POST /step        FoodDeliveryObservation (next state)
+    GET  /state       episode_id + step_count
+    GET  /schema      action / observation schemas
+    WS   /ws          WebSocket persistent session
+    GET  /web         Interactive Web UI
+    GET  /health      { status: "ok" }
 
 Usage:
     uvicorn server.app:app --reload --host 0.0.0.0 --port 8000
@@ -40,12 +40,18 @@ def _make_env() -> FoodDeliveryEnvironment:
 
 
 app = create_app(
-    _make_env,                  # factory mode — each WebSocket session gets its own env
+    _make_env,                  # factory mode - each WebSocket session gets its own env
     FoodDeliveryAction,
     FoodDeliveryObservation,
     env_name="food_delivery_dispatch",
     max_concurrent_envs=4,
 )
+
+
+@app.get("/")
+def root():
+    """Root endpoint."""
+    return {"message": "Food Delivery Dispatch Environment API is running!"}
 
 
 def main(host: str = "0.0.0.0", port: int = 8000) -> None:
