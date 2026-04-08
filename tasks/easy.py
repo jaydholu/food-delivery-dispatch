@@ -10,7 +10,7 @@ Difficulty characteristics:
   - No traffic zones
   - Long deadlines (50-120 steps) giving plenty of time
   - 150 max steps
-  - Low idle and inactivity penalties
+  - Moderate wait penalties to train correct behavior
 """
 
 from __future__ import annotations
@@ -21,38 +21,12 @@ import numpy as np
 from models import EpisodeResult
 from server.food_delivery_dispatch_environment import (
     EASY_CONFIG,
+    EASY_REWARDS,
     DriverStatus,
     EnvConfig,
     FoodDeliveryEnvironment,
-    RewardWeights,
 )
 from tasks.grader import format_grade_report, grade_episode
-
-
-# ---------------------------------------------------------------------------
-# Task reward weights — lenient for easy mode
-# ---------------------------------------------------------------------------
-
-EASY_REWARD_CONFIG = RewardWeights(
-    delivery_success=10.0,
-    early_bonus_max=5.0,
-    early_threshold=15,
-    late_penalty_per_step=1.5,
-    idle_penalty_base=0.05,
-    idle_penalty_growth=0.02,
-    idle_penalty_cap=0.5,
-    inefficiency_penalty=0.2,
-    order_failure=6.0,
-    assignment_reward=0.5,
-    pickup_reward=1.0,
-    reject_penalty=1.0,
-    invalid_action_penalty=3.0,
-    useless_wait_penalty=0.1,
-    consecutive_wait_penalty=1.0,
-    consecutive_wait_threshold=5,
-    inactivity_penalty=0.5,
-    efficiency_bonus_scale=0.3,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -70,12 +44,13 @@ def make_easy_env() -> FoodDeliveryEnvironment:
       - Generous deadlines (50-120 steps)
       - 150 max steps
       - Inactivity threshold: 30 steps
+      - Moderate wait penalties
 
     Returns:
         Configured FoodDeliveryEnvironment instance.
     """
     env = FoodDeliveryEnvironment(task="easy")
-    env._rwt = EASY_REWARD_CONFIG
+    env._rwt = EASY_REWARDS
     return env
 
 

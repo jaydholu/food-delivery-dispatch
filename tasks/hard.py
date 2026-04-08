@@ -13,9 +13,7 @@ Difficulty characteristics:
   - 300 max steps
   - Strict penalties for inactivity (threshold: 15 steps)
   - Higher order failure penalty
-
-Expected baseline score: ~0.60 with greedy.
-Strong LLM agents can achieve 0.80+.
+  - Fastest escalation of wait penalties (threshold=2)
 """
 
 from __future__ import annotations
@@ -26,38 +24,12 @@ import numpy as np
 from models import EpisodeResult
 from server.food_delivery_dispatch_environment import (
     HARD_CONFIG,
+    HARD_REWARDS,
     DriverStatus,
     EnvConfig,
     FoodDeliveryEnvironment,
-    RewardWeights,
 )
 from tasks.grader import format_grade_report, grade_episode
-
-
-# ---------------------------------------------------------------------------
-# Task reward weights — strict for hard mode
-# ---------------------------------------------------------------------------
-
-HARD_REWARD_CONFIG = RewardWeights(
-    delivery_success=10.0,
-    early_bonus_max=4.0,
-    early_threshold=8,
-    late_penalty_per_step=3.0,
-    idle_penalty_base=0.15,
-    idle_penalty_growth=0.07,
-    idle_penalty_cap=2.5,
-    inefficiency_penalty=0.6,
-    order_failure=9.0,
-    assignment_reward=0.5,
-    pickup_reward=1.0,
-    reject_penalty=1.0,
-    invalid_action_penalty=5.0,
-    useless_wait_penalty=0.3,
-    consecutive_wait_penalty=3.0,
-    consecutive_wait_threshold=2,    # Escalate after just 2 consecutive waits
-    inactivity_penalty=1.5,
-    efficiency_bonus_scale=0.7,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -75,12 +47,13 @@ def make_hard_env() -> FoodDeliveryEnvironment:
       - Tight deadlines (25-70 steps)
       - 300 max steps
       - Inactivity threshold: 15 steps (strict)
+      - Consecutive wait escalation after just 2 waits
 
     Returns:
         Configured FoodDeliveryEnvironment instance.
     """
     env = FoodDeliveryEnvironment(task="hard")
-    env._rwt = HARD_REWARD_CONFIG
+    env._rwt = HARD_REWARDS
     return env
 
 

@@ -19,7 +19,7 @@ web_interface:
 metadata:
   task_tiers:
     - name: easy
-      description: "2 drivers, 3 orders, no traffic, generous deadlines (50-120 steps), 150 max steps"
+      description: "2 drivers, 3 orders, no traffic, generous deadlines (50-120 steps), 150 max steps. Moderate penalties."
       drivers: 2
       orders: 3
       max_steps: 150
@@ -27,9 +27,11 @@ metadata:
       dynamic_orders: false
       deadline_range: "50-120 steps"
       target_score: "0.80+"
+      wait_penalty: "-0.5 base, -2.0 after 3 consecutive waits"
+      inactivity_threshold: 30
 
     - name: medium
-      description: "4 drivers, 8 orders, traffic zones, moderate deadlines (30-80 steps), 200 max steps"
+      description: "4 drivers, 8 orders, traffic zones, moderate deadlines (30-80 steps), 200 max steps. Strong penalties."
       drivers: 4
       orders: 8
       max_steps: 200
@@ -37,9 +39,11 @@ metadata:
       dynamic_orders: false
       deadline_range: "30-80 steps"
       target_score: "0.60-0.80"
+      wait_penalty: "-0.5 base, -2.0 after 3 consecutive waits, -0.1 per idle driver per step"
+      inactivity_threshold: 20
 
     - name: hard
-      description: "6 drivers, 15 orders, traffic + dynamic spawning, tight deadlines (25-70 steps), 300 max steps"
+      description: "6 drivers, 15 orders, traffic + dynamic spawning, tight deadlines (25-70 steps), 300 max steps. Strict penalties."
       drivers: 6
       orders: 15
       max_steps: 300
@@ -49,11 +53,13 @@ metadata:
       max_total_orders: 30
       deadline_range: "25-70 steps"
       target_score: "0.50-0.75"
+      wait_penalty: "-0.5 base, -3.0 after 2 consecutive waits, -0.15 per idle driver per step"
+      inactivity_threshold: 15
 
   action_types:
     - assign: "Assign a specific driver to a specific pending order"
     - reject: "Cancel a pending order (incurs a penalty)"
-    - wait:   "Do nothing this step — penalized if orders and drivers are available"
+    - wait:   "Do nothing this step — HEAVILY penalized if orders and drivers are available"
     - batch:  "Assign multiple driver-order pairs simultaneously (most efficient)"
 
   reward:
@@ -62,14 +68,17 @@ metadata:
     early_bonus: "up to +5.0 for early completion"
     pickup: "+1.0 per pickup"
     assignment: "+0.5 per valid assignment (minus distance inefficiency)"
+    urgency_bonus: "+0.5 for assigning an urgent order (deadline < 20 steps)"
     efficiency_bonus: "scaled bonus for delivery rate / steps taken"
 
     # Penalties
     late_penalty: "-2.0 to -3.0 per step late"
     order_failure: "-6.0 to -9.0 per expired order"
     idle_penalty: "-0.05 to -2.5 per idle driver per step (grows with idle duration)"
-    useless_wait: "-0.1 to -0.3 per useless wait step (escalates)"
-    consecutive_wait: "-1.0 to -3.0 extra after 2-5 consecutive waits"
+    idle_driver_step: "-0.10 to -0.15 per idle driver per step when work is available"
+    useless_wait: "-0.5 base per useless wait step"
+    consecutive_wait: "-2.0 to -3.0 extra after 2-3 consecutive waits"
+    no_progress: "-3.0 x 0.2 = -0.6 when no delivery in last 5 steps with idle drivers + pending orders"
     inactivity: "-0.5 to -1.5 when no delivery in last 15-30 steps"
     invalid_action: "-3.0 to -5.0 for invalid driver/order IDs or wrong status"
 
@@ -79,7 +88,10 @@ metadata:
 
   agent_guidance: >
     The agent MUST actively assign drivers to orders every step.
-    Waiting when drivers and orders are available incurs escalating penalties.
+    Waiting when drivers and orders are available incurs SEVERE escalating penalties.
     Use 'batch' action to assign multiple pairs at once for maximum efficiency.
     Prioritise orders with the fewest steps_until_deadline (most urgent first).
     Choose the nearest idle driver to each pickup to minimize travel time.
+    NEVER use 'wait' when idle_drivers > 0 AND pending_orders > 0.
+    The metadata field includes: available_drivers_count, pending_orders_count,
+    urgent_orders_count, idle_time_per_driver, steps_since_last_delivery, consecutive_waits.

@@ -10,6 +10,7 @@ Difficulty characteristics:
   - Moderate deadlines (30-80 steps)
   - 200 max steps
   - Balanced penalties — agent must actively assign or face consequences
+  - Strong wait penalties to force proactive dispatch
 """
 
 from __future__ import annotations
@@ -20,38 +21,12 @@ import numpy as np
 from models import EpisodeResult
 from server.food_delivery_dispatch_environment import (
     MEDIUM_CONFIG,
+    MEDIUM_REWARDS,
     DriverStatus,
     EnvConfig,
     FoodDeliveryEnvironment,
-    RewardWeights,
 )
 from tasks.grader import format_grade_report, grade_episode
-
-
-# ---------------------------------------------------------------------------
-# Task reward weights — balanced for medium difficulty
-# ---------------------------------------------------------------------------
-
-MEDIUM_REWARD_CONFIG = RewardWeights(
-    delivery_success=10.0,
-    early_bonus_max=5.0,
-    early_threshold=10,
-    late_penalty_per_step=2.5,
-    idle_penalty_base=0.1,
-    idle_penalty_growth=0.05,
-    idle_penalty_cap=2.0,
-    inefficiency_penalty=0.5,
-    order_failure=8.0,
-    assignment_reward=0.5,
-    pickup_reward=1.0,
-    reject_penalty=1.0,
-    invalid_action_penalty=5.0,
-    useless_wait_penalty=0.2,
-    consecutive_wait_penalty=2.0,
-    consecutive_wait_threshold=3,
-    inactivity_penalty=1.0,
-    efficiency_bonus_scale=0.5,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -69,12 +44,13 @@ def make_medium_env() -> FoodDeliveryEnvironment:
       - Moderate deadlines (30-80 steps)
       - 200 max steps
       - Inactivity threshold: 20 steps
+      - Strong wait penalties
 
     Returns:
         Configured FoodDeliveryEnvironment instance.
     """
     env = FoodDeliveryEnvironment(task="medium")
-    env._rwt = MEDIUM_REWARD_CONFIG
+    env._rwt = MEDIUM_REWARDS
     return env
 
 
