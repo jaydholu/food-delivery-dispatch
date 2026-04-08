@@ -200,7 +200,7 @@ The `inference.py` script uses a carefully designed system prompt to prevent wai
 1. **Explicit warning** about wait penalties and their compounding nature
 2. **Clear priority order**: assign > reject > wait
 3. **Step-by-step dispatch algorithm** the LLM must follow
-4. **Urgency indicators** (🔴 URGENT / 🟡 SOON / 🟢 OK) in the observation
+4. **Urgency indicators** ( URGENT / SOON / OK) in the observation
 5. **Consecutive wait counter** shown to the LLM so it knows when it's compounding penalties
 6. **Wait override**: if the LLM returns "wait" when work is available, the code automatically substitutes the greedy assignment
 
