@@ -13,13 +13,22 @@ from openenv.core import EnvClient
 from openenv.core.client_types import StepResult
 from openenv.core.env_server.types import State
 
-from .models import (
-    DriverInfo,
-    FoodDeliveryAction,
-    FoodDeliveryObservation,
-    OrderInfo,
-    TrafficZoneInfo,
-)
+try:
+    from .models import (
+        DriverInfo,
+        FoodDeliveryAction,
+        FoodDeliveryObservation,
+        OrderInfo,
+        TrafficZoneInfo,
+    )
+except ImportError:
+    from models import (
+        DriverInfo,
+        FoodDeliveryAction,
+        FoodDeliveryObservation,
+        OrderInfo,
+        TrafficZoneInfo,
+    )
 
 
 class FoodDeliveryEnv(
