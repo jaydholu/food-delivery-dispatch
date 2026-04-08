@@ -28,11 +28,11 @@ inference = [
 ]
 
 [project.scripts]
-server = "food_delivery_dispatch.server.app:main"
+server = "server.app:main"
 
 [tool.setuptools]
 py-modules = ["models", "client"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["server*", "tasks*", "training*"]
+include = ["server*", "tasks*", "baseline*"]
