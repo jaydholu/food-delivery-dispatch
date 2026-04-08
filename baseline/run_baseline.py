@@ -22,8 +22,12 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from environment.environment import FoodDeliveryEnv
-from environment.models import DriverStatus, OrderStatus
+# Correct imports: environment lives in server/, models in root
+from server.food_delivery_dispatch_environment import (
+    FoodDeliveryEnvironment,
+    DriverStatus,
+    OrderStatus,
+)
 from tasks.easy import grade_easy
 from tasks.medium import grade_medium
 from tasks.hard import grade_hard
@@ -33,55 +37,54 @@ from tasks.hard import grade_hard
 # Greedy policy implementation
 # ---------------------------------------------------------------------------
 
-# NOTE: This baseline uses full environment state (env.drivers, env.orders) for simplicity. RL agents should rely only on observations.
-def greedy_policy(observation: dict, env: FoodDeliveryEnv) -> int:
+# NOTE: This baseline uses full environment state directly for simplicity.
+# RL agents should rely only on observations.
+def greedy_policy(observation, env: FoodDeliveryEnvironment) -> dict:
     """
     Nearest-driver greedy dispatch policy.
 
     For each pending order, compute the Euclidean distance to every idle driver.
-    Select the (driver, order) pair with minimum distance and encode it as a 
-    discrete action. If no valid pair exists, return 0 (no-op).
+    Select the (driver, order) pair with minimum distance and return a
+    FoodDeliveryAction-compatible dict. If no valid pair exists, return a wait action.
 
     Args:
-        observation: Observation dict from the environment (unused; we read
+        observation: Observation from the environment (unused; we read
                      live state from ``env`` directly for clarity).
-        env:         The live environment instance.
+        env:         The live FoodDeliveryEnvironment instance.
 
     Returns:
-        Integer action from env.action_space.
+        dict action compatible with env.step().
     """
     # Collect idle drivers
-    idle_drivers = [d for d in env.drivers if d.status == DriverStatus.IDLE]
+    idle_drivers = [d for d in env._drivers if d.status == DriverStatus.IDLE]
 
     # Collect pending orders
-    pending_orders = [o for o in env.orders if o.status == OrderStatus.PENDING]
+    pending_orders = [o for o in env._orders if o.status == OrderStatus.PENDING]
 
     if not idle_drivers or not pending_orders:
-        return 0  # no-op
+        return {"action_type": "wait"}
 
-    best_action = 0
+    best_driver = None
+    best_order = None
     best_dist = float("inf")
 
     for driver in idle_drivers:
         for order in pending_orders:
-            dist = driver.position.distance_to(order.pickup_position)
+            dist = driver.pos.dist(order.pickup)
             if dist < best_dist:
                 best_dist = dist
+                best_driver = driver
+                best_order = order
 
-                # Encode action: k = driver_idx * MAX_ORDERS + order_idx + 1
-                driver_idx = env.drivers.index(driver)
+    if best_driver is None or best_order is None:
+        return {"action_type": "wait"}
 
-                # Find order index in env.orders (up to MAX_ORDERS)
-                try:
-                    order_idx = env.orders.index(order)
-                except ValueError:
-                    continue
-
-                if order_idx >= env._max_orders:
-                    continue
-                best_action = driver_idx * env._max_orders + order_idx + 1
-
-    return best_action
+    from models import FoodDeliveryAction
+    return FoodDeliveryAction(
+        action_type="assign",
+        driver_id=best_driver.driver_id,
+        order_id=best_order.order_id,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -153,8 +156,15 @@ def run_all_tasks(num_episodes: int = 5) -> dict[str, float]:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Run greedy baseline on all Food Delivery tasks.")
-    parser.add_argument("--episodes", type=int, default=5, help="Number of episodes to average per task (default: 5).")
+    parser = argparse.ArgumentParser(
+        description="Run greedy baseline on all Food Delivery tasks."
+    )
+    parser.add_argument(
+        "--episodes",
+        type=int,
+        default=5,
+        help="Number of episodes to average per task (default: 5).",
+    )
     args = parser.parse_args()
 
     scores = run_all_tasks(num_episodes=args.episodes)
