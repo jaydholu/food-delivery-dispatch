@@ -3,8 +3,19 @@ HARD task — 6 drivers, 15 initial orders, traffic + dynamic order spawning.
 
 Dynamic spawning means the agent must continuously balance in-progress
 deliveries against newly arriving demand.
-This is the most realistic and challenging configuration; the greedy
-nearest-driver baseline scores ~0.81.
+This is the most realistic and challenging configuration.
+
+Difficulty characteristics:
+  - 6 drivers, 15 initial orders (up to 30 total with dynamic spawning)
+  - Traffic zones with 1.5x-3.0x slowdown
+  - Tight deadlines (25-70 steps)
+  - Dynamic order arrival (~12% chance per step)
+  - 300 max steps
+  - Strict penalties for inactivity (threshold: 15 steps)
+  - Higher order failure penalty
+
+Expected baseline score: ~0.60 with greedy.
+Strong LLM agents can achieve 0.80+.
 """
 
 from __future__ import annotations
@@ -13,7 +24,7 @@ from typing import Any
 import numpy as np
 
 from models import EpisodeResult
-from server.food_delivery_openenv_environment import (
+from server.food_delivery_dispatch_environment import (
     HARD_CONFIG,
     DriverStatus,
     EnvConfig,
@@ -22,8 +33,9 @@ from server.food_delivery_openenv_environment import (
 )
 from tasks.grader import format_grade_report, grade_episode
 
+
 # ---------------------------------------------------------------------------
-# Task reward weights
+# Task reward weights — strict for hard mode
 # ---------------------------------------------------------------------------
 
 HARD_REWARD_CONFIG = RewardWeights(
@@ -32,11 +44,19 @@ HARD_REWARD_CONFIG = RewardWeights(
     early_threshold=8,
     late_penalty_per_step=3.0,
     idle_penalty_base=0.15,
+    idle_penalty_growth=0.07,
+    idle_penalty_cap=2.5,
     inefficiency_penalty=0.6,
     order_failure=9.0,
     assignment_reward=0.5,
     pickup_reward=1.0,
-    idle_penalty_cap=2.5,
+    reject_penalty=1.0,
+    invalid_action_penalty=5.0,
+    useless_wait_penalty=0.3,
+    consecutive_wait_penalty=3.0,
+    consecutive_wait_threshold=2,    # Escalate after just 2 consecutive waits
+    inactivity_penalty=1.5,
+    efficiency_bonus_scale=0.7,
 )
 
 
@@ -47,6 +67,14 @@ HARD_REWARD_CONFIG = RewardWeights(
 def make_hard_env() -> FoodDeliveryEnvironment:
     """
     Construct and return the HARD task environment.
+
+    HARD settings:
+      - 6 drivers
+      - 15 initial orders (dynamic spawning up to 30)
+      - Traffic zones enabled
+      - Tight deadlines (25-70 steps)
+      - 300 max steps
+      - Inactivity threshold: 15 steps (strict)
 
     Returns:
         Configured FoodDeliveryEnvironment instance.
@@ -68,10 +96,6 @@ def grade_hard(
 ) -> tuple[float, list[EpisodeResult]]:
     """
     Evaluate a policy on the HARD task over multiple episodes.
-
-    The policy receives the raw FoodDeliveryObservation returned by the
-    environment and the environment instance itself, and must return a
-    FoodDeliveryAction (or a dict that can be passed to env.step).
 
     Args:
         policy_fn:    Callable(observation, env) → FoodDeliveryAction.
@@ -99,6 +123,7 @@ def grade_hard(
             dynamic_order_rate=HARD_CONFIG.dynamic_order_rate,
             max_total_orders=HARD_CONFIG.max_total_orders,
             seed=seed_offset + ep,
+            inactivity_threshold=HARD_CONFIG.inactivity_threshold,
         )
 
         obs = env.reset()

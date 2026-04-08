@@ -2,13 +2,13 @@
 # Food Delivery Dispatch — OpenEnv Production Dockerfile
 #
 # Build:
-#   docker build -t food_delivery_openenv-env:latest .
+#   docker build -t food_delivery_dispatch-env:latest .
 #
 # Run server:
-#   docker run --rm -p 8000:8000 food_delivery_openenv-env:latest
+#   docker run --rm -p 8000:8000 food_delivery_dispatch-env:latest
 #
 # Run with task override:
-#   docker run --rm -p 8000:8000 -e FOOD_DELIVERY_TASK=hard food_delivery_openenv-env:latest
+#   docker run --rm -p 8000:8000 -e FOOD_DELIVERY_TASK=hard food_delivery_dispatch-env:latest
 # ============================================================
 
 FROM python:3.12.6-slim

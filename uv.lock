@@ -1533,7 +1533,7 @@ core = [
 ]
 
 [[package]]
-name = "openenv-food-delivery-openenv"
+name = "openenv-food-delivery-dispatch"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [

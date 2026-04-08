@@ -1,9 +1,16 @@
 """
-EASY task — 2 drivers, 3 orders, no traffic, no dynamic spawning.
+EASY task — 2 drivers, 3 orders, no traffic, generous deadlines.
 
-This task is designed for initial policy development and sanity-checking.
-The small state space allows near-exhaustive search and should yield high
-scores (> 0.80) with even simple heuristic policies.
+Designed for initial policy development and sanity-checking.
+The small state space allows near-exhaustive search and should yield
+high scores (> 0.80) with even simple heuristic policies.
+
+Difficulty characteristics:
+  - Only 2 drivers and 3 orders (very manageable)
+  - No traffic zones
+  - Long deadlines (50-120 steps) giving plenty of time
+  - 150 max steps
+  - Low idle and inactivity penalties
 """
 
 from __future__ import annotations
@@ -12,7 +19,7 @@ from typing import Any
 import numpy as np
 
 from models import EpisodeResult
-from server.food_delivery_openenv_environment import (
+from server.food_delivery_dispatch_environment import (
     EASY_CONFIG,
     DriverStatus,
     EnvConfig,
@@ -23,19 +30,28 @@ from tasks.grader import format_grade_report, grade_episode
 
 
 # ---------------------------------------------------------------------------
-# Task reward weights (override defaults for easy mode)
+# Task reward weights — lenient for easy mode
 # ---------------------------------------------------------------------------
 
 EASY_REWARD_CONFIG = RewardWeights(
     delivery_success=10.0,
     early_bonus_max=5.0,
-    late_penalty_per_step=2.0,
+    early_threshold=15,
+    late_penalty_per_step=1.5,
     idle_penalty_base=0.05,
-    inefficiency_penalty=0.3,
-    order_failure=8.0,
+    idle_penalty_growth=0.02,
+    idle_penalty_cap=0.5,
+    inefficiency_penalty=0.2,
+    order_failure=6.0,
     assignment_reward=0.5,
     pickup_reward=1.0,
-    idle_penalty_cap=5.0,
+    reject_penalty=1.0,
+    invalid_action_penalty=3.0,
+    useless_wait_penalty=0.1,
+    consecutive_wait_penalty=1.0,
+    consecutive_wait_threshold=5,
+    inactivity_penalty=0.5,
+    efficiency_bonus_scale=0.3,
 )
 
 
@@ -46,6 +62,14 @@ EASY_REWARD_CONFIG = RewardWeights(
 def make_easy_env() -> FoodDeliveryEnvironment:
     """
     Construct and return the EASY task environment.
+
+    EASY settings:
+      - 2 drivers
+      - 3 initial orders
+      - No traffic
+      - Generous deadlines (50-120 steps)
+      - 150 max steps
+      - Inactivity threshold: 30 steps
 
     Returns:
         Configured FoodDeliveryEnvironment instance.
@@ -67,10 +91,6 @@ def grade_easy(
 ) -> tuple[float, list[EpisodeResult]]:
     """
     Evaluate a policy on the EASY task over multiple episodes.
-
-    The policy receives the raw FoodDeliveryObservation returned by the
-    environment and the environment instance itself, and must return a
-    FoodDeliveryAction (or a dict that can be passed to env.step).
 
     Args:
         policy_fn:    Callable(observation, env) → FoodDeliveryAction.
@@ -96,6 +116,7 @@ def grade_easy(
             enable_traffic=EASY_CONFIG.enable_traffic,
             dynamic_orders=EASY_CONFIG.dynamic_orders,
             seed=seed_offset + ep,
+            inactivity_threshold=EASY_CONFIG.inactivity_threshold,
         )
 
         obs = env.reset()

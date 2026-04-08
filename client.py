@@ -41,7 +41,7 @@ class FoodDeliveryEnv(
     for low-latency multi-step interaction.
 
     Quick start (Docker):
-        >>> env = FoodDeliveryEnv.from_docker_image("food_delivery_openenv-env:latest")
+        >>> env = FoodDeliveryEnv.from_docker_image("food_delivery_dispatch-env:latest")
         >>> try:
         ...     result = env.reset()
         ...     obs = result.observation

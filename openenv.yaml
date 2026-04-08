@@ -1,5 +1,5 @@
 spec_version: 1
-name: food_delivery_openenv
+name: food_delivery_dispatch
 type: space
 runtime: fastapi
 app: server.app:app
@@ -12,30 +12,74 @@ web_interface:
   title: "Food Delivery Dispatch — RL Environment"
   description: >
     Multi-driver, multi-order food delivery dispatch simulation.
-    An RL agent (or LLM) acts as the dispatch controller, assigning orders
-    to drivers to maximise delivery success, minimise lateness and idle time.
+    An RL agent (or LLM) acts as the dispatch controller, assigning orders to drivers to maximise delivery success, minimise lateness and idle time.
+    Three difficulty tiers: easy, medium, hard.
 
 # Environment metadata
 metadata:
   task_tiers:
-    - easy:   "2 drivers, 3 orders, no traffic"
-    - medium: "4 drivers, 8 orders, with traffic"
-    - hard:   "6 drivers, 15 orders, traffic + dynamic spawning"
+    - name: easy
+      description: "2 drivers, 3 orders, no traffic, generous deadlines (50-120 steps), 150 max steps"
+      drivers: 2
+      orders: 3
+      max_steps: 150
+      traffic: false
+      dynamic_orders: false
+      deadline_range: "50-120 steps"
+      target_score: "0.80+"
+
+    - name: medium
+      description: "4 drivers, 8 orders, traffic zones, moderate deadlines (30-80 steps), 200 max steps"
+      drivers: 4
+      orders: 8
+      max_steps: 200
+      traffic: true
+      dynamic_orders: false
+      deadline_range: "30-80 steps"
+      target_score: "0.60-0.80"
+
+    - name: hard
+      description: "6 drivers, 15 orders, traffic + dynamic spawning, tight deadlines (25-70 steps), 300 max steps"
+      drivers: 6
+      orders: 15
+      max_steps: 300
+      traffic: true
+      dynamic_orders: true
+      dynamic_order_rate: 0.12
+      max_total_orders: 30
+      deadline_range: "25-70 steps"
+      target_score: "0.50-0.75"
 
   action_types:
     - assign: "Assign a specific driver to a specific pending order"
     - reject: "Cancel a pending order (incurs a penalty)"
-    - wait:   "Do nothing this step (no-op)"
-    - batch:  "Assign multiple driver-order pairs simultaneously"
+    - wait:   "Do nothing this step — penalized if orders and drivers are available"
+    - batch:  "Assign multiple driver-order pairs simultaneously (most efficient)"
 
   reward:
-    delivery_success: +10.0
-    early_bonus:      "up to +5.0"
-    late_penalty:     "-2.0 per step late"
-    order_failure:    -8.0
-    idle_penalty:     "-0.1 to -2.0 per driver per step"
-    assignment:       +0.5
-    pickup:           +1.0
+    # Positive rewards
+    delivery_success: "+10.0 per on-time delivery"
+    early_bonus: "up to +5.0 for early completion"
+    pickup: "+1.0 per pickup"
+    assignment: "+0.5 per valid assignment (minus distance inefficiency)"
+    efficiency_bonus: "scaled bonus for delivery rate / steps taken"
+
+    # Penalties
+    late_penalty: "-2.0 to -3.0 per step late"
+    order_failure: "-6.0 to -9.0 per expired order"
+    idle_penalty: "-0.05 to -2.5 per idle driver per step (grows with idle duration)"
+    useless_wait: "-0.1 to -0.3 per useless wait step (escalates)"
+    consecutive_wait: "-1.0 to -3.0 extra after 2-5 consecutive waits"
+    inactivity: "-0.5 to -1.5 when no delivery in last 15-30 steps"
+    invalid_action: "-3.0 to -5.0 for invalid driver/order IDs or wrong status"
 
   score_formula: >
-    score = 0.50 * delivery_rate + 0.25 * on_time_rate + 0.15 * reward_rate   + 0.10 * efficiency_rate
+    score = 0.50 * delivery_rate + 0.25 * on_time_rate + 0.15 * reward_rate + 0.10 * efficiency_rate
+    where all components are clamped to [0, 1].
+
+  agent_guidance: >
+    The agent MUST actively assign drivers to orders every step.
+    Waiting when drivers and orders are available incurs escalating penalties.
+    Use 'batch' action to assign multiple pairs at once for maximum efficiency.
+    Prioritise orders with the fewest steps_until_deadline (most urgent first).
+    Choose the nearest idle driver to each pickup to minimize travel time.

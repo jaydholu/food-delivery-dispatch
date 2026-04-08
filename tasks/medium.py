@@ -3,7 +3,13 @@ MEDIUM task — 4 drivers, 8 orders, with traffic congestion zones.
 
 Traffic zones introduce stochastic travel-time variation that requires the
 agent to reason about route feasibility beyond pure distance.
-Expected baseline score: 0.55–0.70.
+
+Difficulty characteristics:
+  - 4 drivers, 8 orders (moderate complexity)
+  - 2-3 traffic zones with 1.5x-3.0x slowdown
+  - Moderate deadlines (30-80 steps)
+  - 200 max steps
+  - Balanced penalties — agent must actively assign or face consequences
 """
 
 from __future__ import annotations
@@ -12,7 +18,7 @@ from typing import Any
 import numpy as np
 
 from models import EpisodeResult
-from server.food_delivery_openenv_environment import (
+from server.food_delivery_dispatch_environment import (
     MEDIUM_CONFIG,
     DriverStatus,
     EnvConfig,
@@ -21,19 +27,30 @@ from server.food_delivery_openenv_environment import (
 )
 from tasks.grader import format_grade_report, grade_episode
 
+
 # ---------------------------------------------------------------------------
-# Task reward weights
+# Task reward weights — balanced for medium difficulty
 # ---------------------------------------------------------------------------
 
 MEDIUM_REWARD_CONFIG = RewardWeights(
     delivery_success=10.0,
     early_bonus_max=5.0,
+    early_threshold=10,
     late_penalty_per_step=2.5,
     idle_penalty_base=0.1,
+    idle_penalty_growth=0.05,
+    idle_penalty_cap=2.0,
     inefficiency_penalty=0.5,
     order_failure=8.0,
     assignment_reward=0.5,
     pickup_reward=1.0,
+    reject_penalty=1.0,
+    invalid_action_penalty=5.0,
+    useless_wait_penalty=0.2,
+    consecutive_wait_penalty=2.0,
+    consecutive_wait_threshold=3,
+    inactivity_penalty=1.0,
+    efficiency_bonus_scale=0.5,
 )
 
 
@@ -44,6 +61,14 @@ MEDIUM_REWARD_CONFIG = RewardWeights(
 def make_medium_env() -> FoodDeliveryEnvironment:
     """
     Construct and return the MEDIUM task environment.
+
+    MEDIUM settings:
+      - 4 drivers
+      - 8 initial orders
+      - Traffic zones enabled
+      - Moderate deadlines (30-80 steps)
+      - 200 max steps
+      - Inactivity threshold: 20 steps
 
     Returns:
         Configured FoodDeliveryEnvironment instance.
@@ -65,10 +90,6 @@ def grade_medium(
 ) -> tuple[float, list[EpisodeResult]]:
     """
     Evaluate a policy on the MEDIUM task over multiple episodes.
-
-    The policy receives the raw FoodDeliveryObservation returned by the
-    environment and the environment instance itself, and must return a
-    FoodDeliveryAction (or a dict that can be passed to env.step).
 
     Args:
         policy_fn:    Callable(observation, env) → FoodDeliveryAction.
@@ -94,6 +115,7 @@ def grade_medium(
             enable_traffic=MEDIUM_CONFIG.enable_traffic,
             dynamic_orders=MEDIUM_CONFIG.dynamic_orders,
             seed=seed_offset + ep,
+            inactivity_threshold=MEDIUM_CONFIG.inactivity_threshold,
         )
 
         obs = env.reset()

@@ -8,7 +8,7 @@ The returned score in [0.0, 1.0] is the canonical hackathon metric.
 from __future__ import annotations
 
 from models import EpisodeResult
-from server.food_delivery_openenv_environment import Order, OrderStatus
+from server.food_delivery_dispatch_environment import Order, OrderStatus
 
 def grade_episode(
     orders: list[Order],

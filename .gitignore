@@ -66,7 +66,7 @@ runs/
 checkpoints/
 models/saved/
 *.zip
-!food_delivery_openenv.zip   # keep any manually committed release zip
+!food_delivery_dispatch.zip   # keep any manually committed release zip
 
 # TensorBoard logs
 tb_logs/

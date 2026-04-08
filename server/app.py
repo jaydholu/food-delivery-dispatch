@@ -19,17 +19,15 @@ import os
 try:
     from openenv.core.env_server.http_server import create_app
 except Exception as e:
-    raise ImportError(
-        "openenv-core is required. Install with: pip install openenv-core"
-    ) from e
+    raise ImportError("openenv-core is required. Install with: pip install openenv-core") from e
 
 try:
     from ..models import FoodDeliveryAction, FoodDeliveryObservation
-    from .food_delivery_openenv_environment import FoodDeliveryEnvironment
+    from .food_delivery_dispatch_environment import FoodDeliveryEnvironment
     
 except (ImportError, ModuleNotFoundError):
     from models import FoodDeliveryAction, FoodDeliveryObservation
-    from server.food_delivery_openenv_environment import FoodDeliveryEnvironment
+    from server.food_delivery_dispatch_environment import FoodDeliveryEnvironment
 
 
 # Task is configurable via environment variable (default: medium)
@@ -45,7 +43,7 @@ app = create_app(
     _make_env,                  # factory mode — each WebSocket session gets its own env
     FoodDeliveryAction,
     FoodDeliveryObservation,
-    env_name="food_delivery_openenv",
+    env_name="food_delivery_dispatch",
     max_concurrent_envs=4,
 )
 

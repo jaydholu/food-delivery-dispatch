@@ -3,7 +3,7 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openenv-food_delivery_openenv"
+name = "openenv-food_delivery_dispatch"
 version = "1.0.0"
 description = "Food Delivery Dispatch RL Environment for OpenEnv"
 requires-python = ">=3.10"
@@ -28,7 +28,7 @@ inference = [
 ]
 
 [project.scripts]
-server = "food_delivery_openenv.server.app:main"
+server = "food_delivery_dispatch.server.app:main"
 
 [tool.setuptools]
 py-modules = ["models", "client"]
