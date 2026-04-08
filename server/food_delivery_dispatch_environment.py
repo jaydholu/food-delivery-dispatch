@@ -5,6 +5,9 @@ The agent acts as a dispatch controller: each step it issues one of four
 action types (assign, reject, wait, batch). The simulation advances time,
 moves drivers, resolves pickups and deliveries, handles deadlines, and
 optionally spawns new orders (HARD mode).
+
+FIXED VERSION: Stronger wait penalties, improved reward shaping,
+full task system support (easy/medium/hard).
 """
 
 from __future__ import annotations
@@ -122,7 +125,7 @@ class EnvConfig:
     dynamic_order_rate: float = 0.12
     max_total_orders: int = 30
     seed: int = 42
-    inactivity_threshold: int = 20      # Inactivity threshold: penalize if no delivery in this many steps
+    inactivity_threshold: int = 20
 
 
 # Default configs for each task tier
@@ -172,30 +175,114 @@ TASK_CONFIGS = {
 
 
 # ---------------------------------------------------------------------------
-# Reward weights — tuned to discourage waiting and encourage deliveries
+# Reward weights — tuned per difficulty, strongly discourage waiting
 # ---------------------------------------------------------------------------
 
 @dataclass
 class RewardWeights:
+    # Positive
     delivery_success: float = 10.0
     early_bonus_max: float = 5.0
     early_threshold: int = 10
-    late_penalty_per_step: float = 2.0
     partial_credit: float = 3.0
+    assignment_reward: float = 0.5
+    pickup_reward: float = 1.0
+    efficiency_bonus_scale: float = 0.5
+
+    # Negative
+    late_penalty_per_step: float = 2.0
     order_failure: float = 8.0
     idle_penalty_base: float = 0.1
     idle_penalty_growth: float = 0.05
     idle_penalty_cap: float = 2.0
-    assignment_reward: float = 0.5
     inefficiency_penalty: float = 0.5
-    pickup_reward: float = 1.0
     reject_penalty: float = 1.0
     invalid_action_penalty: float = 5.0
-    useless_wait_penalty: float = 0.2
-    consecutive_wait_penalty: float = 2.0
-    consecutive_wait_threshold: int = 3
-    inactivity_penalty: float = 1.0
-    efficiency_bonus_scale: float = 0.5
+
+    # Anti-wait penalties (CRITICAL — stronger than before)
+    useless_wait_penalty: float = 0.5        # Base penalty per useless wait
+    consecutive_wait_penalty: float = 2.0   # Extra penalty after threshold
+    consecutive_wait_threshold: int = 3     # Waits before escalation
+    inactivity_penalty: float = 1.0         # No delivery for N steps
+    no_progress_penalty: float = 3.0        # No delivery in last 5 steps (severe)
+    idle_driver_step_penalty: float = 0.1   # Per idle driver per step
+
+
+# Difficulty-tuned reward weights
+EASY_REWARDS = RewardWeights(
+    delivery_success=10.0,
+    early_bonus_max=5.0,
+    early_threshold=15,
+    late_penalty_per_step=1.5,
+    idle_penalty_base=0.05,
+    idle_penalty_growth=0.02,
+    idle_penalty_cap=0.5,
+    inefficiency_penalty=0.2,
+    order_failure=6.0,
+    assignment_reward=0.5,
+    pickup_reward=1.0,
+    reject_penalty=1.0,
+    invalid_action_penalty=3.0,
+    useless_wait_penalty=0.5,
+    consecutive_wait_penalty=2.0,
+    consecutive_wait_threshold=3,
+    inactivity_penalty=0.5,
+    no_progress_penalty=2.0,
+    idle_driver_step_penalty=0.1,
+    efficiency_bonus_scale=0.3,
+)
+
+MEDIUM_REWARDS = RewardWeights(
+    delivery_success=10.0,
+    early_bonus_max=5.0,
+    early_threshold=10,
+    late_penalty_per_step=2.5,
+    idle_penalty_base=0.1,
+    idle_penalty_growth=0.05,
+    idle_penalty_cap=2.0,
+    inefficiency_penalty=0.5,
+    order_failure=8.0,
+    assignment_reward=0.5,
+    pickup_reward=1.0,
+    reject_penalty=1.0,
+    invalid_action_penalty=5.0,
+    useless_wait_penalty=0.5,
+    consecutive_wait_penalty=2.0,
+    consecutive_wait_threshold=3,
+    inactivity_penalty=1.0,
+    no_progress_penalty=3.0,
+    idle_driver_step_penalty=0.1,
+    efficiency_bonus_scale=0.5,
+)
+
+HARD_REWARDS = RewardWeights(
+    delivery_success=10.0,
+    early_bonus_max=4.0,
+    early_threshold=8,
+    late_penalty_per_step=3.0,
+    idle_penalty_base=0.15,
+    idle_penalty_growth=0.07,
+    idle_penalty_cap=2.5,
+    inefficiency_penalty=0.6,
+    order_failure=9.0,
+    assignment_reward=0.5,
+    pickup_reward=1.0,
+    reject_penalty=1.0,
+    invalid_action_penalty=5.0,
+    useless_wait_penalty=0.5,
+    consecutive_wait_penalty=3.0,
+    consecutive_wait_threshold=2,    # Escalate faster in hard mode
+    inactivity_penalty=1.5,
+    no_progress_penalty=3.0,
+    idle_driver_step_penalty=0.15,
+    efficiency_bonus_scale=0.7,
+)
+
+TASK_REWARDS = {
+    "easy": EASY_REWARDS,
+    "medium": MEDIUM_REWARDS,
+    "hard": HARD_REWARDS,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -206,12 +293,13 @@ class FoodDeliveryEnvironment(Environment):
     """
     Multi-driver, multi-order food delivery dispatch RL environment.
 
-    Improvements over base version:
-      - Strong wait penalties to discourage inaction
+    FIXED VERSION improvements:
+      - Strong wait penalties: base + escalating consecutive + no-progress
+      - Idle driver step penalty discourages leaving drivers unused
       - Inactivity penalty when no delivery occurs for N steps
-      - Consecutive wait escalation penalty
-      - Much stronger invalid action penalty (5.0 vs 0.2)
-      - Efficiency bonus tied to delivery rate / steps
+      - Per-driver idle step penalty proportional to idle count
+      - Efficiency bonus tied to delivery rate / steps taken
+      - Clear observation signals for agent decision-making
     """
 
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
@@ -219,7 +307,7 @@ class FoodDeliveryEnvironment(Environment):
     def __init__(self, task: str = "medium") -> None:
         self._task = task
         self._cfg = TASK_CONFIGS.get(task, MEDIUM_CONFIG)
-        self._rwt = RewardWeights()
+        self._rwt = TASK_REWARDS.get(task, MEDIUM_REWARDS)
         self._state = State(episode_id=str(uuid4()), step_count=0)
         self._rng = random.Random(self._cfg.seed)
 
@@ -235,7 +323,8 @@ class FoodDeliveryEnvironment(Environment):
         self._delivered_all: int = 0
         self._failed: int = 0
         self._consecutive_global_waits: int = 0
-        self._steps_since_last_delivery: int = 0   # inactivity tracking
+        self._steps_since_last_delivery: int = 0
+        self._recent_delivery_window: List[bool] = []  # Last 5 steps: delivery happened?
 
     # ------------------------------------------------------------------
     # OpenEnv interface
@@ -253,6 +342,7 @@ class FoodDeliveryEnvironment(Environment):
         self._failed = 0
         self._consecutive_global_waits = 0
         self._steps_since_last_delivery = 0
+        self._recent_delivery_window = []
         self._state = State(episode_id=str(uuid4()), step_count=0)
 
         self._drivers = [
@@ -282,6 +372,11 @@ class FoodDeliveryEnvironment(Environment):
         self._current_step += 1
         self._steps_since_last_delivery += 1
 
+        # Track delivery window (last 5 steps)
+        if len(self._recent_delivery_window) >= 5:
+            self._recent_delivery_window.pop(0)
+        self._recent_delivery_window.append(False)  # Will be updated if delivery happens
+
         reward = 0.0
         action_valid = True
         action_msg = ""
@@ -294,8 +389,13 @@ class FoodDeliveryEnvironment(Environment):
         self._move_drivers()
 
         # 3. Resolve pickups / deliveries
-        pickup_reward, delivery_reward = self._resolve_arrivals()
+        pickup_reward, delivery_reward, delivery_happened = self._resolve_arrivals()
         reward += pickup_reward + delivery_reward
+
+        if delivery_happened:
+            self._steps_since_last_delivery = 0
+            if self._recent_delivery_window:
+                self._recent_delivery_window[-1] = True
 
         # 4. Expire overdue orders
         failure_penalty = self._check_deadlines()
@@ -305,26 +405,40 @@ class FoodDeliveryEnvironment(Environment):
         if self._cfg.dynamic_orders:
             self._maybe_spawn_orders()
 
-        # 6. Idle driver penalty
+        # 6. Idle driver penalty (PER DRIVER PER STEP)
         idle_penalty = self._compute_idle_penalty()
         reward += idle_penalty
 
-        # 7. Inactivity penalty — punish extended periods without delivery
+        # 7. Per-idle-driver step penalty — strongly discourages ignoring available drivers
+        num_idle = sum(1 for d in self._drivers if d.status == DriverStatus.IDLE)
+        num_pending = sum(1 for o in self._orders if o.status == OrderStatus.PENDING)
+        if num_idle > 0 and num_pending > 0:
+            # Extra per-driver penalty when work is available but drivers sit idle
+            reward -= self._rwt.idle_driver_step_penalty * num_idle
+
+        # 8. Inactivity penalty — punish extended periods without delivery
         if self._steps_since_last_delivery >= self._cfg.inactivity_threshold:
             inactivity_steps = self._steps_since_last_delivery - self._cfg.inactivity_threshold
-            # Scale penalty by how long we've been inactive
             scaled = min(inactivity_steps * 0.05, self._rwt.inactivity_penalty)
             reward -= scaled
 
-        # 8. Efficiency bonus — reward delivery rate relative to steps taken
+        # 9. No-progress penalty — severe penalty if no delivery in last 5 steps
+        # when orders and drivers exist
+        if len(self._recent_delivery_window) >= 5:
+            no_delivery_last_5 = not any(self._recent_delivery_window)
+            pending_exist = any(o.status == OrderStatus.PENDING for o in self._orders)
+            if no_delivery_last_5 and pending_exist and num_idle > 0:
+                reward -= self._rwt.no_progress_penalty * 0.2  # Scaled down slightly
+
+        # 10. Efficiency bonus — reward delivery rate relative to steps taken
         if self._delivered_all > 0 and self._current_step > 0:
             efficiency = self._delivered_all / max(self._current_step, 1)
             reward += efficiency * self._rwt.efficiency_bonus_scale
 
-        # 9. Accumulate
+        # 11. Accumulate
         self._cumulative_rew += reward
 
-        # 10. Check termination
+        # 12. Check termination
         done = self._is_done()
 
         return self._build_obs(reward=reward, done=done, action_valid=action_valid, action_msg=action_msg)
@@ -340,9 +454,7 @@ class FoodDeliveryEnvironment(Environment):
     def _apply_action_safe(self, action: FoodDeliveryAction) -> Tuple[float, bool, str]:
         try:
             return self._apply_action(action)
-        
         except Exception as exc:
-            # Strong penalty for crashing actions
             penalty = -self._rwt.invalid_action_penalty
             return penalty, False, f"Action error: {exc}"
 
@@ -362,7 +474,7 @@ class FoodDeliveryEnvironment(Environment):
             if not action.assignments:
                 penalty = -self._rwt.invalid_action_penalty
                 return penalty, False, "batch action requires 'assignments' list."
-            
+
             total_r = 0.0
             msgs = []
             any_valid = False
@@ -383,40 +495,43 @@ class FoodDeliveryEnvironment(Environment):
 
             return total_r, any_valid, " | ".join(msgs)
 
-        # Unknown action type — strong penalty
+        # Unknown action type
         penalty = -self._rwt.invalid_action_penalty
-
         return penalty, False, f"Unknown action_type: {at!r}"
 
     def _handle_wait(self) -> Tuple[float, bool, str]:
         """
-        Handle wait action.
+        Handle wait action with STRONG penalties.
 
-        Penalties applied:
-          1. Base useless-wait penalty when work is available
+        Penalties:
+          1. Base useless-wait penalty (0.5) when work is available
           2. Escalating consecutive-wait penalty after threshold
+          3. No-progress compound penalty
         """
         pending = [o for o in self._orders if o.status == OrderStatus.PENDING]
         idle = [d for d in self._drivers if d.status == DriverStatus.IDLE]
 
         if pending and idle:
-            # Useless wait: work is available but agent chose to do nothing
+            # Useless wait: work is available but agent chose inaction
             self._consecutive_global_waits += 1
 
-            # Base penalty, grows with consecutive waits (capped)
-            base_penalty = self._rwt.useless_wait_penalty * min(self._consecutive_global_waits, 10)
+            # Base penalty — fixed 0.5 per useless wait
+            base_penalty = self._rwt.useless_wait_penalty
+
+            # Growing consecutive penalty
+            consec_extra = self._rwt.useless_wait_penalty * min(self._consecutive_global_waits - 1, 9)
 
             # Extra escalation penalty after threshold
-            extra_penalty = 0.0
-            if self._consecutive_global_waits > self._rwt.consecutive_wait_threshold:
-                extra_penalty = self._rwt.consecutive_wait_penalty
+            escalation = 0.0
+            if self._consecutive_global_waits >= self._rwt.consecutive_wait_threshold:
+                escalation = self._rwt.consecutive_wait_penalty
 
-            total_penalty = -(base_penalty + extra_penalty)
+            total_penalty = -(base_penalty + consec_extra + escalation)
             return (
                 total_penalty,
                 True,
-                f"Useless wait (consecutive={self._consecutive_global_waits}). "
-                f"Penalty={total_penalty:.2f}",
+                f"Useless wait (consecutive={self._consecutive_global_waits}, penalty={total_penalty:.2f}). "
+                f"{len(idle)} idle drivers, {len(pending)} pending orders!",
             )
         else:
             # Appropriate wait — no work available
@@ -467,6 +582,11 @@ class FoodDeliveryEnvironment(Environment):
         dist = driver.pos.dist(order.pickup)
         ineff = -self._rwt.inefficiency_penalty * dist
         reward = self._rwt.assignment_reward + ineff
+
+        # Urgency bonus — reward assigning urgent orders
+        steps_left = order.deadline - self._current_step
+        if steps_left < 20:
+            reward += 0.5  # Bonus for handling urgent orders
 
         return reward, True, f"Assigned driver {driver_id} → order {order_id} (dist={dist:.3f})."
 
@@ -521,7 +641,6 @@ class FoodDeliveryEnvironment(Environment):
         for zone in self._traffic:
             if zone.active and d.pos.dist(zone.center) <= zone.radius:
                 spd /= zone.multiplier
-
         return max(spd, 0.001)
 
     @staticmethod
@@ -535,16 +654,18 @@ class FoodDeliveryEnvironment(Environment):
         else:
             d.pos = Pos(d.pos.x + dx / dist * speed, d.pos.y + dy / dist * speed)
 
-    def _resolve_arrivals(self) -> Tuple[float, float]:
+    def _resolve_arrivals(self) -> Tuple[float, float, bool]:
+        """Returns (pickup_reward, delivery_reward, delivery_happened)."""
         order_map = {o.order_id: o for o in self._orders}
         pickup_reward = 0.0
         delivery_reward = 0.0
+        delivery_happened = False
         tol = 1e-4
 
         for d in self._drivers:
             if d.assigned_order is None:
                 continue
-            
+
             order = order_map.get(d.assigned_order)
             if order is None:
                 continue
@@ -564,7 +685,7 @@ class FoodDeliveryEnvironment(Environment):
                     order.status = OrderStatus.DELIVERED
                     order.delivered_at = self._current_step
                     self._delivered_all += 1
-                    self._steps_since_last_delivery = 0  # Reset inactivity counter
+                    delivery_happened = True
 
                     steps_remaining = order.deadline - self._current_step
                     if steps_remaining >= 0:
@@ -580,7 +701,7 @@ class FoodDeliveryEnvironment(Environment):
                         delivery_reward += self._rwt.partial_credit
                         delivery_reward -= self._rwt.late_penalty_per_step * min(lateness, 10)
 
-        return pickup_reward, delivery_reward
+        return pickup_reward, delivery_reward, delivery_happened
 
     def _check_deadlines(self) -> float:
         penalty = 0.0
@@ -701,6 +822,17 @@ class FoodDeliveryEnvironment(Environment):
             for z in self._traffic
         ]
 
+        # Compute urgent orders count (deadline within 20 steps)
+        urgent_orders_count = sum(
+            1 for o in self._orders
+            if o.status == OrderStatus.PENDING
+            and (o.deadline - self._current_step) < 20
+        )
+
+        # Compute available (idle) drivers count
+        available_drivers_count = len(idle_drivers)
+        pending_orders_count = sum(1 for o in self._orders if o.status == OrderStatus.PENDING)
+
         return FoodDeliveryObservation(
             episode_id=str(cast(str, self._state.episode_id)),
             current_step=int(self._current_step),
@@ -710,7 +842,7 @@ class FoodDeliveryEnvironment(Environment):
             num_idle_drivers=int(len(idle_drivers)),
             num_active_drivers=int(sum(1 for d in self._drivers if d.status != DriverStatus.IDLE)),
             orders=order_infos,
-            num_pending_orders=int(sum(1 for o in self._orders if o.status == OrderStatus.PENDING)),
+            num_pending_orders=int(pending_orders_count),
             num_active_orders=int(sum(1 for o in self._orders if o.is_active())),
             num_delivered_orders=int(self._delivered_all),
             num_failed_orders=int(self._failed),
@@ -731,6 +863,13 @@ class FoodDeliveryEnvironment(Environment):
                 "step": int(self._current_step),
                 "steps_since_last_delivery": int(self._steps_since_last_delivery),
                 "consecutive_waits": int(self._consecutive_global_waits),
+                "available_drivers_count": int(available_drivers_count),
+                "pending_orders_count": int(pending_orders_count),
+                "urgent_orders_count": int(urgent_orders_count),
+                "idle_time_per_driver": [
+                    {"driver_id": d.driver_id, "idle_steps": d.idle_steps}
+                    for d in self._drivers
+                ],
             },
         )
 
