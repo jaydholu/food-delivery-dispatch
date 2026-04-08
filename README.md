@@ -356,6 +356,16 @@ openenv push --repo-id my-org/food-delivery-dispatch
 
 ---
 
+## Limitations
+
+- The LLM agent may overuse the "wait" action in certain scenarios, especially under medium and hard tasks.
+- While reward shaping discourages idle behavior, long-horizon planning is still limited by the LLM’s step-by-step decision process.
+- Performance can vary depending on the underlying model and temperature settings.
+- Further improvements can be achieved using trained RL policies or stronger planning-based agents.
+- These limitations highlight opportunities for future work in improving agent reasoning, planning, and policy learning.
+
+---
+
 ## License
 
 MIT © Food Delivery RL Team
