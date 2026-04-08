@@ -1,5 +1,5 @@
 """
-Baseline policy — Greedy Nearest-Driver Dispatch.
+Baseline policy - Greedy Nearest-Driver Dispatch.
 
 Strategy:
     At each step, identify the closest idle driver to each pending order.
@@ -104,7 +104,7 @@ def run_all_tasks(num_episodes: int = 5) -> dict[str, float]:
     results: dict[str, float] = {}
 
     print("\n" + "=" * 60)
-    print("  FOOD DELIVERY DISPATCH — GREEDY BASELINE EVALUATION")
+    print("  FOOD DELIVERY DISPATCH - GREEDY BASELINE EVALUATION")
     print("=" * 60)
 
     # --- EASY ---
@@ -142,7 +142,7 @@ def run_all_tasks(num_episodes: int = 5) -> dict[str, float]:
     print("  FINAL BASELINE SCORES")
     print("=" * 60)
     for task, score in results.items():
-        bar = "█" * int(score * 30)
+        bar = "" * int(score * 30)
         print(f"  {task.upper():8s} | {bar:<30s} | {score:.4f}")
     print("=" * 60 + "\n")
 

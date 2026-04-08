@@ -1,5 +1,5 @@
 """
-EASY task — 2 drivers, 3 orders, no traffic, generous deadlines.
+EASY task - 2 drivers, 3 orders, no traffic, generous deadlines.
 
 Designed for initial policy development and sanity-checking.
 The small state space allows near-exhaustive search and should yield
@@ -68,7 +68,7 @@ def grade_easy(
     Evaluate a policy on the EASY task over multiple episodes.
 
     Args:
-        policy_fn:    Callable(observation, env) → FoodDeliveryAction.
+        policy_fn:    Callable(observation, env)  FoodDeliveryAction.
         num_episodes: Number of evaluation episodes.
         seed_offset:  Shift seeds for independent evaluation runs.
         verbose:      Print per-episode reports.
@@ -119,7 +119,7 @@ def grade_easy(
         all_results.append(result)
 
         if verbose:
-            print(format_grade_report(score, result, f"EASY — Episode {ep + 1}"))
+            print(format_grade_report(score, result, f"EASY - Episode {ep + 1}"))
 
     mean_score = float(np.mean(scores))
     if verbose:

@@ -1,4 +1,4 @@
-"""Food Delivery Dispatch — OpenEnv Environment."""
+"""Food Delivery Dispatch - OpenEnv Environment."""
 
 from .client import FoodDeliveryEnv
 from .models import FoodDeliveryAction, FoodDeliveryObservation

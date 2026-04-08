@@ -1,8 +1,8 @@
 """
 Data models for the Food Delivery Dispatch OpenEnv Environment.
 
-Action:      FoodDeliveryAction   — structured dispatch command
-Observation: FoodDeliveryObservation — full environment snapshot (no numpy)
+Action:      FoodDeliveryAction   - structured dispatch command
+Observation: FoodDeliveryObservation - full environment snapshot (no numpy)
 """
 
 from __future__ import annotations
@@ -113,7 +113,7 @@ class FoodDeliveryObservation(Observation):
     """
     Full environment snapshot returned after every reset() / step().
 
-    All numeric values are plain Python floats/ints — no numpy arrays.
+    All numeric values are plain Python floats/ints - no numpy arrays.
     The agent (or LLM) can read this as clean JSON.
     """
 

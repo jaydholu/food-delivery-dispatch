@@ -1,5 +1,5 @@
 """
-HARD task — 6 drivers, 15 initial orders, traffic + dynamic order spawning.
+HARD task - 6 drivers, 15 initial orders, traffic + dynamic order spawning.
 
 Dynamic spawning means the agent must continuously balance in-progress
 deliveries against newly arriving demand.
@@ -71,7 +71,7 @@ def grade_hard(
     Evaluate a policy on the HARD task over multiple episodes.
 
     Args:
-        policy_fn:    Callable(observation, env) → FoodDeliveryAction.
+        policy_fn:    Callable(observation, env)  FoodDeliveryAction.
         num_episodes: Number of evaluation episodes.
         seed_offset:  Shift seeds for independent evaluation runs.
         verbose:      Print per-episode reports.
@@ -124,7 +124,7 @@ def grade_hard(
         all_results.append(result)
 
         if verbose:
-            print(format_grade_report(score, result, f"HARD — Episode {ep + 1}"))
+            print(format_grade_report(score, result, f"HARD - Episode {ep + 1}"))
 
     mean_score = float(np.mean(scores))
     if verbose:

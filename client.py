@@ -1,5 +1,5 @@
 """
-Food Delivery Dispatch — OpenEnv Client.
+Food Delivery Dispatch - OpenEnv Client.
 
 Wraps the OpenEnv EnvClient to communicate with the Food Delivery server
 over WebSocket, exposing reset() / step() with typed action / observation.

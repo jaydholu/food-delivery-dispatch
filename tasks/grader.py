@@ -1,5 +1,5 @@
 """
-Grader module — standardised task evaluation for all difficulty tiers.
+Grader module - standardised task evaluation for all difficulty tiers.
 
 Each task calls ``grade_episode`` after running a policy for one episode.
 The returned score in [0.0, 1.0] is the canonical hackathon metric.
@@ -18,10 +18,10 @@ def grade_episode(
     max_steps: int,
 ) -> tuple[float, EpisodeResult]:
     """
-    Compute the normalised score ∈ [0.0, 1.0] for a completed episode.
+    Compute the normalised score  [0.0, 1.0] for a completed episode.
 
     Scoring formula:
-        score = 0.50 × delivery_rate + 0.25 × on_time_rate + 0.15 × reward_rate + 0.10 × efficiency_rate
+        score = 0.50  delivery_rate + 0.25  on_time_rate + 0.15  reward_rate + 0.10  efficiency_rate
 
     where:
         delivery_rate   = delivered / total_orders

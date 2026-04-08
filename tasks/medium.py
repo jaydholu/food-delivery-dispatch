@@ -1,5 +1,5 @@
 """
-MEDIUM task — 4 drivers, 8 orders, with traffic congestion zones.
+MEDIUM task - 4 drivers, 8 orders, with traffic congestion zones.
 
 Traffic zones introduce stochastic travel-time variation that requires the
 agent to reason about route feasibility beyond pure distance.
@@ -9,7 +9,7 @@ Difficulty characteristics:
   - 2-3 traffic zones with 1.5x-3.0x slowdown
   - Moderate deadlines (30-80 steps)
   - 200 max steps
-  - Balanced penalties — agent must actively assign or face consequences
+  - Balanced penalties - agent must actively assign or face consequences
   - Strong wait penalties to force proactive dispatch
 """
 
@@ -68,7 +68,7 @@ def grade_medium(
     Evaluate a policy on the MEDIUM task over multiple episodes.
 
     Args:
-        policy_fn:    Callable(observation, env) → FoodDeliveryAction.
+        policy_fn:    Callable(observation, env)  FoodDeliveryAction.
         num_episodes: Number of evaluation episodes.
         seed_offset:  Shift seeds for independent evaluation runs.
         verbose:      Print per-episode reports.
@@ -119,7 +119,7 @@ def grade_medium(
         all_results.append(result)
 
         if verbose:
-            print(format_grade_report(score, result, f"MEDIUM — Episode {ep + 1}"))
+            print(format_grade_report(score, result, f"MEDIUM - Episode {ep + 1}"))
 
     mean_score = float(np.mean(scores))
     if verbose:

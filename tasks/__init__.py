@@ -1,5 +1,5 @@
 """
-Tasks package — exposes all three task factories and graders.
+Tasks package - exposes all three task factories and graders.
 """
 
 from tasks.easy import grade_easy, make_easy_env
