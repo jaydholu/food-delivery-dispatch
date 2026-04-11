@@ -73,7 +73,7 @@ Three difficulty levels are provided, each with increasing complexity:
 
 | Task   | Drivers | Orders | Traffic | Dynamic Spawning | Deadline Range | Max Steps | Target Score |
 |--------|---------|--------|---------|-----------------|----------------|-----------|-------------|
-| easy   | 2       | 3      | ✗       | ✗               | 50-120 steps   | 150       | 0.80+       |
+| easy   | 2       | 3      | ✗       | ✗               | 50-120 steps   | 150       | 0.70+       |
 | medium | 4       | 8      | ✓       | ✗               | 30-80 steps    | 200       | 0.60-0.80   |
 | hard   | 6       | 15     | ✓       | ✓ (~12%/step)   | 25-70 steps    | 300       | 0.50-0.75   |
 
