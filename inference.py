@@ -524,13 +524,11 @@ async def run_inference() -> None:
 
                     try:
                         action = FoodDeliveryAction(**action_dict)
-                        step_result = env.step(action)
-
-                        obs_dict = step_result.observation.model_dump() if hasattr(step_result, 'observation') else step_result.model_dump()
-                        reward = step_result.reward if hasattr(step_result, 'reward') else obs_dict.get("reward", 0.0)
-                        if reward is None:
-                            reward = 0.0
-                        done = (step_result.done if hasattr(step_result, 'done') else False) or obs_dict.get("done", False)
+                        # env.step() returns FoodDeliveryObservation directly
+                        obs = env.step(action)
+                        obs_dict = obs.model_dump()
+                        reward = float(obs.reward or 0.0)
+                        done = bool(obs.done)
 
                         if not obs_dict.get("last_action_valid", True):
                             error_msg = obs_dict.get("last_action_message", "invalid action")
