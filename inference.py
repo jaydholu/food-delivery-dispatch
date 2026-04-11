@@ -386,15 +386,58 @@ def decide_action(client: OpenAI, obs_dict: Dict, step: int, history: List[Dict]
             if action["action_type"] not in valid_types:
                 raise ValueError(f"Invalid action_type: {action['action_type']}")
 
-            # Safety check: if LLM wants to wait when work is available,
-            # override with greedy assignment
-            if action["action_type"] == "wait":
-                idle = [d for d in obs_dict.get("drivers", []) if d.get("status") == "idle"]
-                pending = [o for o in obs_dict.get("orders", []) if o.get("status") == "pending"]
+            # Safety validation for ALL action types
+            idle = [d for d in obs_dict.get("drivers", []) if d.get("status") == "idle"]
+            pending = [o for o in obs_dict.get("orders", []) if o.get("status") == "pending"]
+            idle_ids = {d["driver_id"] for d in idle}
+            pending_ids = {o["order_id"] for o in pending}
 
+            # Override wait when work is available
+            if action["action_type"] == "wait":
                 if idle and pending:
-                    # Override the wait with a greedy assignment
                     return safe_default_action(obs_dict)
+                return action
+
+            # Validate assign: driver must be idle, order must be pending
+            if action["action_type"] == "assign":
+                d_id = action.get("driver_id")
+                o_id = action.get("order_id")
+                if d_id not in idle_ids or o_id not in pending_ids:
+                    # LLM picked invalid IDs — use greedy instead
+                    if idle and pending:
+                        return safe_default_action(obs_dict)
+                return action
+
+            # Validate batch: all pairs must be valid
+            if action["action_type"] == "batch":
+                assignments = action.get("assignments", [])
+                if not assignments and idle and pending:
+                    return safe_default_action(obs_dict)
+                # Filter to only valid assignments
+                used_drivers = set()
+                used_orders = set()
+                valid = []
+                for a in assignments:
+                    d_id = a.get("driver_id")
+                    o_id = a.get("order_id")
+                    if (d_id in idle_ids and o_id in pending_ids
+                            and d_id not in used_drivers and o_id not in used_orders):
+                        valid.append(a)
+                        used_drivers.add(d_id)
+                        used_orders.add(o_id)
+                if not valid and idle and pending:
+                    # All LLM assignments were invalid — use greedy
+                    return safe_default_action(obs_dict)
+                if valid:
+                    action["assignments"] = valid
+                    if len(valid) == 1:
+                        # Convert single-assignment batch to assign
+                        return {
+                            "action_type": "assign",
+                            "driver_id": valid[0]["driver_id"],
+                            "order_id": valid[0]["order_id"],
+                        }
+                return action
 
             return action
 
