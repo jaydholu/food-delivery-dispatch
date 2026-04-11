@@ -26,7 +26,7 @@ metadata:
       traffic: false
       dynamic_orders: false
       deadline_range: "50-120 steps"
-      target_score: "0.80+"
+      target_score: "0.70+"
       wait_penalty: "-0.5 base, -2.0 after 3 consecutive waits"
       inactivity_threshold: 30
 

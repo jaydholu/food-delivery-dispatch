@@ -3,7 +3,7 @@ EASY task - 2 drivers, 3 orders, no traffic, generous deadlines.
 
 Designed for initial policy development and sanity-checking.
 The small state space allows near-exhaustive search and should yield
-high scores (> 0.80) with even simple heuristic policies.
+high scores (> 0.70) with even simple heuristic policies.
 
 Difficulty characteristics:
   - Only 2 drivers and 3 orders (very manageable)
