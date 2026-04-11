@@ -410,17 +410,56 @@ def decide_action(client: OpenAI, obs_dict: Dict, step: int, history: List[Dict]
 # Score calculator
 # ---------------------------------------------------------------------------
 
-def compute_normalized_score(rewards: List[float], max_steps: int) -> float:
-    """Normalized score in [0, 1] based on total reward accumulated."""
+def compute_normalized_score(rewards: List[float], max_steps: int, obs_dict: Dict | None = None) -> float:
+    """
+    Normalized score in [0, 1] using the official grader formula:
+        score = 0.50 * delivery_rate + 0.25 * on_time_rate
+              + 0.15 * reward_rate   + 0.10 * efficiency_rate
+
+    If obs_dict (final observation) is available, uses actual delivery stats.
+    Otherwise falls back to reward-based estimate.
+    """
     if not rewards:
         return 0.0
 
     total_reward = sum(rewards)
-    MAX_TOTAL_REWARD = max_steps * 10.0
 
+    if obs_dict is not None:
+        # Use actual delivery stats from the final observation
+        total_orders = (
+            obs_dict.get("num_delivered_orders", 0)
+            + obs_dict.get("num_failed_orders", 0)
+            + obs_dict.get("num_pending_orders", 0)
+            + obs_dict.get("num_active_orders", 0)
+        )
+        if total_orders == 0:
+            total_orders = max(len(obs_dict.get("orders", [])), 1)
+
+        delivered = obs_dict.get("num_delivered_orders", 0)
+        delivery_rate_val = obs_dict.get("delivery_rate", delivered / max(total_orders, 1))
+        on_time_rate_val = obs_dict.get("on_time_rate", 0.0)
+
+        reward_ceiling = max(total_orders, 1) * 20.0
+        reward_rate = max(0.0, min(total_reward / reward_ceiling, 1.0))
+
+        total_steps = len(rewards)
+        # Estimate idle driver steps from metadata if available
+        idle_driver_steps = obs_dict.get("metadata", {}).get("total_idle_driver_steps", total_steps)
+        idle_ceiling = max_steps * 10
+        efficiency_rate = 1.0 - min(idle_driver_steps / max(idle_ceiling, 1), 1.0)
+
+        score = (
+            0.50 * delivery_rate_val
+            + 0.25 * on_time_rate_val
+            + 0.15 * reward_rate
+            + 0.10 * efficiency_rate
+        )
+        return max(0.0, min(score, 1.0))
+
+    # Fallback: simple reward-based estimate
+    MAX_TOTAL_REWARD = max_steps * 10.0
     if MAX_TOTAL_REWARD <= 0:
         return 0.0
-
     score = total_reward / MAX_TOTAL_REWARD
     return min(max(score, 0.0), 1.0)
 
@@ -453,6 +492,7 @@ async def run_inference() -> None:
         success: bool = False
         score: float = 0.0
         history: List[Dict] = []
+        final_obs_dict: Dict | None = None
 
         log_start(task=task, env=IMAGE_NAME, model=MODEL_NAME)
 
@@ -504,6 +544,8 @@ async def run_inference() -> None:
                     log_step(step=steps_taken, action=action_dict, reward=reward, done=done, error=error_msg)
                     history.append({"step": steps_taken, "action_type": action_type, "reward": reward})
 
+                final_obs_dict = obs_dict
+
             else:
                 # ------ Embedded mode: run env in-process (no Docker) ------
                 from server.food_delivery_dispatch_environment import FoodDeliveryEnvironment
@@ -542,7 +584,9 @@ async def run_inference() -> None:
                     log_step(step=steps_taken, action=action_dict, reward=reward, done=done, error=error_msg)
                     history.append({"step": steps_taken, "action_type": action_type, "reward": reward})
 
-            score = compute_normalized_score(all_rewards, max_steps)
+                final_obs_dict = obs_dict
+
+            score = compute_normalized_score(all_rewards, max_steps, final_obs_dict)
             success = score > 0.0
 
         except Exception as exc:
@@ -552,7 +596,7 @@ async def run_inference() -> None:
                 flush=True,
             )
             success = False
-            score = compute_normalized_score(all_rewards, max_steps)
+            score = compute_normalized_score(all_rewards, max_steps, final_obs_dict)
 
         finally:
             log_end(success=success, steps=steps_taken, score=score, rewards=all_rewards)
