@@ -73,10 +73,9 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
     rewards_str = json.dumps([round(r, 4) for r in rewards])
     succ_str = "true" if success else "false"
     print(
-        f"[END] success={succ_str} steps={steps}"
+        f"[END] success={succ_str} steps={steps} "
         f"score={score:.4f} rewards={rewards_str}",
         flush=True,
-        end="\n\n",
     )
 
 
@@ -431,15 +430,18 @@ def compute_normalized_score(rewards: List[float], max_steps: int) -> float:
 # ---------------------------------------------------------------------------
 
 async def run_inference() -> None:
-    """Main async entry point - runs easy, medium, and hard tasks in sequence."""
+    """Main async entry point - runs easy, medium, and hard tasks in sequence.
 
+    Supports two modes:
+      1. Embedded (default): creates the environment in-process - no Docker needed
+      2. Remote: connects to a running server via ENV_BASE_URL
+    """
     from models import FoodDeliveryAction
-    from client import FoodDeliveryEnv
 
-    #  run all three tasks instead of a single task
+    ENV_BASE_URL = os.getenv("ENV_BASE_URL", "")
     TASKS = ["easy", "medium", "hard"]
 
-    llm = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    llm = OpenAI(base_url=API_BASE_URL, api_key=API_KEY, timeout=30.0)
     task_scores: List[float] = []
 
     for task in TASKS:
@@ -451,89 +453,118 @@ async def run_inference() -> None:
         success: bool = False
         score: float = 0.0
         history: List[Dict] = []
-        env: FoodDeliveryEnv | None = None
 
         log_start(task=task, env=IMAGE_NAME, model=MODEL_NAME)
 
         try:
-            env = await FoodDeliveryEnv.from_docker_image(
-                IMAGE_NAME,
-                env_vars={"FOOD_DELIVERY_TASK": task},
-            )
+            if ENV_BASE_URL:
+                # ------ Remote mode: connect to running server via HTTP ------
+                import httpx
 
-            reset_result = await env.reset()
-            obs = reset_result.observation
-            obs_dict = obs.model_dump()
-            max_steps = obs_dict.get("max_steps", max_steps)
+                base = ENV_BASE_URL.rstrip("/")
 
-            done = False
+                # Reset environment
+                reset_resp = httpx.post(f"{base}/reset", timeout=30.0)
+                reset_resp.raise_for_status()
+                reset_data = reset_resp.json()
+                obs_dict = reset_data.get("observation", reset_data)
+                max_steps = obs_dict.get("max_steps", max_steps)
 
-            while not done and steps_taken < max_steps:
-                steps_taken += 1
-                error_msg: str | None = None
+                done = False
+                while not done and steps_taken < max_steps:
+                    steps_taken += 1
+                    error_msg: str | None = None
 
-                action_dict = decide_action(llm, obs_dict, steps_taken, history)
-                action_type = action_dict.get("action_type", "wait")
-                reward = 0.0
-
-                try:
-                    action = FoodDeliveryAction(**action_dict)
-                    result = await env.step(action)
-
-                    obs = result.observation
-                    obs_dict = obs.model_dump()
-                    reward = result.reward or 0.0
-                    done = result.done or obs_dict.get("done", False)
-
-                    if not obs_dict.get("last_action_valid", True):
-                        error_msg = obs_dict.get("last_action_message", "invalid action")
-
-                except Exception as exc:
-                    error_msg = str(exc)
+                    action_dict = decide_action(llm, obs_dict, steps_taken, history)
+                    action_type = action_dict.get("action_type", "wait")
                     reward = 0.0
-                    done = False
 
-                all_rewards.append(reward)
+                    try:
+                        step_resp = httpx.post(
+                            f"{base}/step",
+                            json={"action": action_dict},
+                            timeout=30.0,
+                        )
+                        step_resp.raise_for_status()
+                        step_data = step_resp.json()
 
-                log_step(step=steps_taken, action=action_dict, reward=reward, done=done, error=error_msg)
+                        obs_dict = step_data.get("observation", {})
+                        reward = step_data.get("reward", 0.0) or 0.0
+                        done = step_data.get("done", False) or obs_dict.get("done", False)
 
-                history.append(
-                    {
-                        "step": steps_taken,
-                        "action_type": action_type,
-                        "reward": reward,
-                    }
-                )
+                        if not obs_dict.get("last_action_valid", True):
+                            error_msg = obs_dict.get("last_action_message", "invalid action")
+
+                    except Exception as exc:
+                        error_msg = str(exc)
+                        reward = 0.0
+                        done = False
+
+                    all_rewards.append(reward)
+                    log_step(step=steps_taken, action=action_dict, reward=reward, done=done, error=error_msg)
+                    history.append({"step": steps_taken, "action_type": action_type, "reward": reward})
+
+            else:
+                # ------ Embedded mode: run env in-process (no Docker) ------
+                from server.food_delivery_dispatch_environment import FoodDeliveryEnvironment
+
+                env = FoodDeliveryEnvironment(task=task)
+                obs = env.reset()
+                obs_dict = obs.model_dump()
+                max_steps = obs_dict.get("max_steps", max_steps)
+
+                done = False
+                while not done and steps_taken < max_steps:
+                    steps_taken += 1
+                    error_msg = None
+
+                    action_dict = decide_action(llm, obs_dict, steps_taken, history)
+                    action_type = action_dict.get("action_type", "wait")
+                    reward = 0.0
+
+                    try:
+                        action = FoodDeliveryAction(**action_dict)
+                        step_result = env.step(action)
+
+                        obs_dict = step_result.observation.model_dump() if hasattr(step_result, 'observation') else step_result.model_dump()
+                        reward = step_result.reward if hasattr(step_result, 'reward') else obs_dict.get("reward", 0.0)
+                        if reward is None:
+                            reward = 0.0
+                        done = (step_result.done if hasattr(step_result, 'done') else False) or obs_dict.get("done", False)
+
+                        if not obs_dict.get("last_action_valid", True):
+                            error_msg = obs_dict.get("last_action_message", "invalid action")
+
+                    except Exception as exc:
+                        error_msg = str(exc)
+                        reward = 0.0
+                        done = False
+
+                    all_rewards.append(reward)
+                    log_step(step=steps_taken, action=action_dict, reward=reward, done=done, error=error_msg)
+                    history.append({"step": steps_taken, "action_type": action_type, "reward": reward})
 
             score = compute_normalized_score(all_rewards, max_steps)
             success = score > 0.0
 
         except Exception as exc:
-
             print(
                 f"[ERROR] task={task} {exc}\n{traceback.format_exc()}",
                 file=sys.stderr,
                 flush=True,
             )
-
             success = False
             score = compute_normalized_score(all_rewards, max_steps)
 
         finally:
-            if env is not None:
-                try:
-                    await env.close()
-                except Exception:
-                    pass
-
             log_end(success=success, steps=steps_taken, score=score, rewards=all_rewards)
 
         task_scores.append(score)
 
-    #  print average score across all tasks
+    # Print average score across all tasks
     if task_scores:
         avg_score = sum(task_scores) / len(task_scores)
-        print(f"[FINAL] avg_score = {avg_score:.4f}", flush=True)
+        print(f"[FINAL] avg_score={avg_score:.4f}", flush=True)
 
 
 # ---------------------------------------------------------------------------

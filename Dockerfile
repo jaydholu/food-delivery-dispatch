@@ -29,18 +29,23 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Copy application source
+# Copy ALL application source files
 COPY __init__.py      ./
 COPY models.py        ./
 COPY client.py        ./
+COPY inference.py     ./
 COPY openenv.yaml     ./
+COPY pyproject.toml   ./
 COPY server/          ./server/
+COPY tasks/           ./tasks/
+COPY baseline/        ./baseline/
 
 # PYTHONPATH so imports resolve from /app
 ENV PYTHONPATH="/app"
 ENV FOOD_DELIVERY_TASK="medium"
 
-EXPOSE 8000
+# HuggingFace Spaces requires port 7860
+EXPOSE 7860
 
-# Default: start OpenEnv HTTP + WebSocket server
-CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default: start OpenEnv HTTP + WebSocket server on HF Spaces port
+CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860"]

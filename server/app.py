@@ -54,7 +54,7 @@ def root():
     return {"message": "Food Delivery Dispatch Environment API is running!"}
 
 
-def main(host: str = "0.0.0.0", port: int = 8000) -> None:
+def main(host: str = "0.0.0.0", port: int = 7860) -> None:
     """Entry point for direct execution."""
     import uvicorn
     uvicorn.run(app, host=host, port=port)
@@ -64,10 +64,11 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--task", type=str, default="medium", choices=["easy", "medium", "hard"])
     args = parser.parse_args()
 
     os.environ["FOOD_DELIVERY_TASK"] = args.task
 
+    # main() entry point — port override via CLI arg
     main(port=args.port)
