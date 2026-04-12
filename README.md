@@ -26,7 +26,7 @@ tags:
 
 Modern food delivery platforms (Zomato, Swiggy, Uber Eats) must continuously assign thousands of incoming orders to a fleet of drivers while accounting for:
 
-- **Geography** — driver and order locations scattered across a city grid
+- **Geography** — driver and order locations on a continuous 2D map with Euclidean distances.
 - **Time pressure** — each order has a hard deadline; late deliveries hurt revenue
 - **Traffic congestion** — zones that slow driver movement unpredictably
 - **Dynamic demand** — new orders arriving continuously throughout a shift
