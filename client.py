@@ -66,7 +66,6 @@ class FoodDeliveryEnv(
     # ------------------------------------------------------------------
     # Outgoing payload
     # ------------------------------------------------------------------
-
     def _step_payload(self, action: FoodDeliveryAction) -> Dict:
         """Serialise FoodDeliveryAction to JSON-safe dict."""
         payload: Dict = {"action_type": action.action_type}
@@ -86,7 +85,6 @@ class FoodDeliveryEnv(
     # ------------------------------------------------------------------
     # Incoming payload
     # ------------------------------------------------------------------
-
     def _parse_result(self, payload: Dict) -> StepResult[FoodDeliveryObservation]:
         """Parse server JSON response into typed StepResult."""
         obs_data    = payload.get("observation", {})
@@ -108,7 +106,6 @@ class FoodDeliveryEnv(
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
     @staticmethod
     def _parse_observation(obs_data: Dict, payload: Dict) -> FoodDeliveryObservation:
         """Convert raw dict to FoodDeliveryObservation."""
@@ -126,6 +123,7 @@ class FoodDeliveryEnv(
                     total_deliveries   = d.get("total_deliveries", 0),
                     speed              = d.get("speed", 0.05),
                 ))
+
             return out
 
         def _parse_orders(raw: List[Dict]) -> List[OrderInfo]:
@@ -144,6 +142,7 @@ class FoodDeliveryEnv(
                     assigned_driver_id               = o.get("assigned_driver_id"),
                     distance_to_nearest_idle_driver  = o.get("distance_to_nearest_idle_driver"),
                 ))
+
             return out
 
         def _parse_traffic(raw: List[Dict]) -> List[TrafficZoneInfo]:
@@ -156,6 +155,7 @@ class FoodDeliveryEnv(
                     slowdown_multiplier = z.get("slowdown_multiplier", 1.5),
                     active              = z.get("active", True),
                 ))
+                
             return out
 
         return FoodDeliveryObservation(

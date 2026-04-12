@@ -2,13 +2,13 @@
 FastAPI application for the Food Delivery Dispatch OpenEnv Environment.
 
 Endpoints (OpenEnv spec):
-    POST /reset       FoodDeliveryObservation (initial state)
-    POST /step        FoodDeliveryObservation (next state)
+    GET  /            Root endppoint
     GET  /state       episode_id + step_count
     GET  /schema      action / observation schemas
-    WS   /ws          WebSocket persistent session
-    GET  /web         Interactive Web UI
     GET  /health      { status: "ok" }
+    POST /reset       FoodDeliveryObservation (initial state)
+    POST /step        FoodDeliveryObservation (next state)
+    WS   /ws          WebSocket persistent session
 
 Usage:
     uvicorn server.app:app --reload --host 0.0.0.0 --port 8000

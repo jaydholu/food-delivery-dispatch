@@ -4,7 +4,7 @@ An LLM (via HuggingFace router API) observes the environment state each step
 and decides which dispatch action to take. The agent is prompted with strong
 behavioral guidance to actively assign drivers and avoid waiting.
 
-STRICT Log format (NO extra output allowed):
+STRICT Logging format:
     [START] task=<task> env=<image> model=<model>
     [STEP]  step=<n> action=<json> reward=<float> done=<bool> error=<null|msg>
     [END]   success=<bool> steps=<n> score=<float> rewards=<list>
@@ -34,7 +34,7 @@ from openai import OpenAI
 
 
 # ---------------------------------------------------------------------------
-# Environment variables - HuggingFace router
+# Environment variables and constants
 # ---------------------------------------------------------------------------
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
@@ -51,7 +51,7 @@ MAX_STEPS = MAX_STEPS_MAP.get(TASK, 200)
 
 
 # ---------------------------------------------------------------------------
-# Strict logging helpers - EXACT required format, NO extra output
+# Strict logging helpers
 # ---------------------------------------------------------------------------
 
 def log_start(task: str, env: str, model: str) -> None:
@@ -164,7 +164,7 @@ def build_user_prompt(obs_dict: Dict, step: int, history: List[Dict]) -> str:
 
     # Format idle drivers with positions
     idle_lines = [
-        f"   Driver {d['driver_id']}: pos=({d['x']:.3f}, {d['y']:.3f}), speed={d.get('speed', 0.05):.3f}"
+        f"   Driver {d['driver_id']}: position=({d['x']:.3f}, {d['y']:.3f}), speed={d.get('speed', 0.05):.3f}"
         for d in idle_drivers
     ]
 
@@ -217,10 +217,13 @@ def build_user_prompt(obs_dict: Dict, step: int, history: List[Dict]) -> str:
                 f"\n   Most urgent order: Order {most_urgent['order_id']} "
                 f"(deadline in {most_urgent.get('steps_until_deadline', '?')} steps)"
             )
+
     elif not idle_drivers:
         guidance = "All drivers busy - wait is acceptable."
+
     elif not pending_orders:
         guidance = "No pending orders - wait is acceptable."
+
     else:
         guidance = "Consider your options carefully."
 
@@ -413,6 +416,7 @@ def decide_action(client: OpenAI, obs_dict: Dict, step: int, history: List[Dict]
                 assignments = action.get("assignments", [])
                 if not assignments and idle and pending:
                     return safe_default_action(obs_dict)
+                
                 # Filter to only valid assignments
                 used_drivers = set()
                 used_orders = set()
@@ -420,14 +424,17 @@ def decide_action(client: OpenAI, obs_dict: Dict, step: int, history: List[Dict]
                 for a in assignments:
                     d_id = a.get("driver_id")
                     o_id = a.get("order_id")
+
                     if (d_id in idle_ids and o_id in pending_ids
                             and d_id not in used_drivers and o_id not in used_orders):
                         valid.append(a)
                         used_drivers.add(d_id)
                         used_orders.add(o_id)
+
                 if not valid and idle and pending:
                     # All LLM assignments were invalid — use greedy
                     return safe_default_action(obs_dict)
+                
                 if valid:
                     action["assignments"] = valid
                     if len(valid) == 1:
@@ -437,6 +444,7 @@ def decide_action(client: OpenAI, obs_dict: Dict, step: int, history: List[Dict]
                             "driver_id": valid[0]["driver_id"],
                             "order_id": valid[0]["order_id"],
                         }
+                    
                 return action
 
             return action
@@ -456,11 +464,9 @@ def decide_action(client: OpenAI, obs_dict: Dict, step: int, history: List[Dict]
 def compute_normalized_score(rewards: List[float], max_steps: int, obs_dict: Dict | None = None) -> float:
     """
     Normalized score in [0, 1] using the official grader formula:
-        score = 0.50 * delivery_rate + 0.25 * on_time_rate
-              + 0.15 * reward_rate   + 0.10 * efficiency_rate
+        score = 0.50 * delivery_rate + 0.25 * on_time_rate + 0.15 * reward_rate   + 0.10 * efficiency_rate
 
-    If obs_dict (final observation) is available, uses actual delivery stats.
-    Otherwise falls back to reward-based estimate.
+    If obs_dict (final observation) is available, uses actual delivery stats. Otherwise falls back to reward-based estimate.
     """
     if not rewards:
         return 0.0
@@ -491,12 +497,8 @@ def compute_normalized_score(rewards: List[float], max_steps: int, obs_dict: Dic
         idle_ceiling = max_steps * 10
         efficiency_rate = 1.0 - min(idle_driver_steps / max(idle_ceiling, 1), 1.0)
 
-        score = (
-            0.50 * delivery_rate_val
-            + 0.25 * on_time_rate_val
-            + 0.15 * reward_rate
-            + 0.10 * efficiency_rate
-        )
+        score = 0.50 * delivery_rate_val + 0.25 * on_time_rate_val + 0.15 * reward_rate + 0.10 * efficiency_rate
+
         return max(0.0, min(score, 1.0))
 
     # Fallback: simple reward-based estimate
@@ -504,6 +506,7 @@ def compute_normalized_score(rewards: List[float], max_steps: int, obs_dict: Dic
     if MAX_TOTAL_REWARD <= 0:
         return 0.0
     score = total_reward / MAX_TOTAL_REWARD
+
     return min(max(score, 0.0), 1.0)
 
 
@@ -597,8 +600,8 @@ async def run_inference() -> None:
                 obs = env.reset()
                 obs_dict = obs.model_dump()
                 max_steps = obs_dict.get("max_steps", max_steps)
-
                 done = False
+                
                 while not done and steps_taken < max_steps:
                     steps_taken += 1
                     error_msg = None

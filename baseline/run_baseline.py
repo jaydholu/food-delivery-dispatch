@@ -22,7 +22,6 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-# Correct imports: environment lives in server/, models in root
 from server.food_delivery_dispatch_environment import (
     FoodDeliveryEnvironment,
     DriverStatus,
@@ -70,7 +69,7 @@ def greedy_policy(observation, env: FoodDeliveryEnvironment) -> dict:
 
     for driver in idle_drivers:
         for order in pending_orders:
-            dist = driver.pos.dist(order.pickup)
+            dist = driver.position.dist(order.pickup)
             if dist < best_dist:
                 best_dist = dist
                 best_driver = driver
@@ -84,7 +83,7 @@ def greedy_policy(observation, env: FoodDeliveryEnvironment) -> dict:
         action_type="assign",
         driver_id=best_driver.driver_id,
         order_id=best_order.order_id,
-    )
+    )  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
