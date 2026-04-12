@@ -5,9 +5,6 @@ The agent acts as a dispatch controller: each step it issues one of four
 action types (assign, reject, wait, batch). The simulation advances time,
 moves drivers, resolves pickups and deliveries, handles deadlines, and
 optionally spawns new orders (HARD mode).
-
-FIXED VERSION: Stronger wait penalties, improved reward shaping,
-full task system support (easy/medium/hard).
 """
 
 from __future__ import annotations
@@ -60,18 +57,18 @@ class OrderStatus(str, Enum):
 
 
 @dataclass
-class Pos:
+class Position:
     x: float
     y: float
 
-    def dist(self, other: "Pos") -> float:
+    def dist(self, other: Position) -> float:
         return sqrt((self.x - other.x) ** 2 + (self.y - other.y) ** 2)
 
 
 @dataclass
 class Driver:
     driver_id: int
-    pos: Pos
+    position: Position
     status: DriverStatus = DriverStatus.IDLE
     assigned_order: int | None = None
     speed: float = 0.05
@@ -84,8 +81,8 @@ class Driver:
 @dataclass
 class Order:
     order_id: int
-    pickup: Pos
-    dropoff: Pos
+    pickup: Position
+    dropoff: Position
     created_at: int
     deadline: int
     status: OrderStatus = OrderStatus.PENDING
@@ -95,7 +92,7 @@ class Order:
     priority: float = 0.5
 
     def is_active(self) -> bool:
-        return self.status in (OrderStatus.PENDING, OrderStatus.ASSIGNED)
+        return self.status in (OrderStatus.PENDING, OrderStatus.ASSIGNED, OrderStatus.PICKED_UP)
 
     def is_terminal(self) -> bool:
         return self.status in (OrderStatus.DELIVERED, OrderStatus.FAILED)
@@ -103,7 +100,7 @@ class Order:
 
 @dataclass
 class TrafficZone:
-    center: Pos
+    center: Position
     radius: float
     multiplier: float
     active: bool = True
@@ -199,16 +196,16 @@ class RewardWeights:
     reject_penalty: float = 1.0
     invalid_action_penalty: float = 5.0
 
-    # Anti-wait penalties (CRITICAL - stronger than before)
-    useless_wait_penalty: float = 0.5        # Base penalty per useless wait
-    consecutive_wait_penalty: float = 2.0   # Extra penalty after threshold
-    consecutive_wait_threshold: int = 3     # Waits before escalation
-    inactivity_penalty: float = 1.0         # No delivery for N steps
-    no_progress_penalty: float = 3.0        # No delivery in last 5 steps (severe)
-    idle_driver_step_penalty: float = 0.1   # Per idle driver per step
+    # Anti-wait penalties
+    useless_wait_penalty: float = 0.5
+    consecutive_wait_penalty: float = 2.0
+    consecutive_wait_threshold: int = 3
+    inactivity_penalty: float = 1.0
+    no_progress_penalty: float = 3.0
+    idle_driver_step_penalty: float = 0.1
 
 
-# Difficulty-tuned reward weights
+# Difficulties - tuned reward weights
 EASY_REWARDS = RewardWeights(
     delivery_success=10.0,
     early_bonus_max=5.0,
@@ -271,7 +268,7 @@ HARD_REWARDS = RewardWeights(
     invalid_action_penalty=5.0,
     useless_wait_penalty=0.5,
     consecutive_wait_penalty=3.0,
-    consecutive_wait_threshold=2,    # Escalate faster in hard mode
+    consecutive_wait_threshold=2,
     inactivity_penalty=1.5,
     no_progress_penalty=3.0,
     idle_driver_step_penalty=0.15,
@@ -292,14 +289,6 @@ TASK_REWARDS = {
 class FoodDeliveryEnvironment(Environment):
     """
     Multi-driver, multi-order food delivery dispatch RL environment.
-
-    FIXED VERSION improvements:
-      - Strong wait penalties: base + escalating consecutive + no-progress
-      - Idle driver step penalty discourages leaving drivers unused
-      - Inactivity penalty when no delivery occurs for N steps
-      - Per-driver idle step penalty proportional to idle count
-      - Efficiency bonus tied to delivery rate / steps taken
-      - Clear observation signals for agent decision-making
     """
 
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
@@ -329,7 +318,6 @@ class FoodDeliveryEnvironment(Environment):
     # ------------------------------------------------------------------
     # OpenEnv interface
     # ------------------------------------------------------------------
-
     def reset(self) -> FoodDeliveryObservation:
         cfg = self._cfg
         self._rng = random.Random(cfg.seed)
@@ -348,7 +336,7 @@ class FoodDeliveryEnvironment(Environment):
         self._drivers = [
             Driver(
                 driver_id=i,
-                pos=self._rand_pos(),
+                position=self._rand_pos(),
                 speed=self._rng.uniform(0.04, 0.07),
             )
             for i in range(cfg.num_drivers)
@@ -422,8 +410,7 @@ class FoodDeliveryEnvironment(Environment):
             scaled = min(inactivity_steps * 0.05, self._rwt.inactivity_penalty)
             reward -= scaled
 
-        # 9. No-progress penalty - severe penalty if no delivery in last 5 steps
-        # when orders and drivers exist
+        # 9. No-progress penalty - severe penalty if no delivery in last 5 steps even when orders and drivers exist
         if len(self._recent_delivery_window) >= 5:
             no_delivery_last_5 = not any(self._recent_delivery_window)
             pending_exist = any(o.status == OrderStatus.PENDING for o in self._orders)
@@ -450,7 +437,6 @@ class FoodDeliveryEnvironment(Environment):
     # ------------------------------------------------------------------
     # Safe action processing
     # ------------------------------------------------------------------
-
     def _apply_action_safe(self, action: FoodDeliveryAction) -> Tuple[float, bool, str]:
         try:
             return self._apply_action(action)
@@ -489,6 +475,7 @@ class FoodDeliveryEnvironment(Environment):
                 r, v, m = self._do_assign(did, oid)
                 total_r += r
                 msgs.append(m)
+
                 if v:
                     any_valid = True
             self._consecutive_global_waits = 0
@@ -497,6 +484,7 @@ class FoodDeliveryEnvironment(Environment):
 
         # Unknown action type
         penalty = -self._rwt.invalid_action_penalty
+
         return penalty, False, f"Unknown action_type: {at!r}"
 
     def _handle_wait(self) -> Tuple[float, bool, str]:
@@ -527,6 +515,7 @@ class FoodDeliveryEnvironment(Environment):
                 escalation = self._rwt.consecutive_wait_penalty
 
             total_penalty = -(base_penalty + consec_extra + escalation)
+
             return (
                 total_penalty,
                 True,
@@ -536,6 +525,7 @@ class FoodDeliveryEnvironment(Environment):
         else:
             # Appropriate wait - no work available
             self._consecutive_global_waits = 0
+
             return 0.0, True, "Wait (no work available - appropriate)."
 
     def _do_assign(self, driver_id: int | None, order_id: int | None) -> Tuple[float, bool, str]:
@@ -569,7 +559,6 @@ class FoodDeliveryEnvironment(Environment):
             penalty = -self._rwt.invalid_action_penalty
             return penalty, False, f"Order {order_id} not pending (status={order.status})."
 
-        # Valid assignment
         driver.status = DriverStatus.PICKING_UP
         driver.assigned_order = order_id
         driver.idle_steps = 0
@@ -579,7 +568,7 @@ class FoodDeliveryEnvironment(Environment):
 
         self._consecutive_global_waits = 0
 
-        dist = driver.pos.dist(order.pickup)
+        dist = driver.position.dist(order.pickup)
         ineff = -self._rwt.inefficiency_penalty * dist
         reward = self._rwt.assignment_reward + ineff
 
@@ -618,7 +607,6 @@ class FoodDeliveryEnvironment(Environment):
     # ------------------------------------------------------------------
     # Simulation mechanics
     # ------------------------------------------------------------------
-
     def _move_drivers(self) -> None:
         order_map = {o.order_id: o for o in self._orders}
 
@@ -639,20 +627,20 @@ class FoodDeliveryEnvironment(Environment):
     def _effective_speed(self, d: Driver) -> float:
         spd = d.speed
         for zone in self._traffic:
-            if zone.active and d.pos.dist(zone.center) <= zone.radius:
+            if zone.active and d.position.dist(zone.center) <= zone.radius:
                 spd /= zone.multiplier
         return max(spd, 0.001)
 
     @staticmethod
-    def _move_toward(d: Driver, target: Pos, speed: float) -> None:
-        dx = target.x - d.pos.x
-        dy = target.y - d.pos.y
+    def _move_toward(d: Driver, target: Position, speed: float) -> None:
+        dx = target.x - d.position.x
+        dy = target.y - d.position.y
         dist = sqrt(dx * dx + dy * dy)
 
         if dist <= speed:
-            d.pos = Pos(target.x, target.y)
+            d.position = Position(target.x, target.y)
         else:
-            d.pos = Pos(d.pos.x + dx / dist * speed, d.pos.y + dy / dist * speed)
+            d.position = Position(d.position.x + dx / dist * speed, d.position.y + dy / dist * speed)
 
     def _resolve_arrivals(self) -> Tuple[float, float, bool]:
         """Returns (pickup_reward, delivery_reward, delivery_happened)."""
@@ -671,14 +659,14 @@ class FoodDeliveryEnvironment(Environment):
                 continue
 
             if d.status == DriverStatus.PICKING_UP:
-                if d.pos.dist(order.pickup) <= tol:
+                if d.position.dist(order.pickup) <= tol:
                     d.status = DriverStatus.DELIVERING
                     order.status = OrderStatus.PICKED_UP
                     order.picked_up_at = self._current_step
                     pickup_reward += self._rwt.pickup_reward
 
             elif d.status == DriverStatus.DELIVERING:
-                if d.pos.dist(order.dropoff) <= tol:
+                if d.position.dist(order.dropoff) <= tol:
                     d.status = DriverStatus.IDLE
                     d.assigned_order = None
                     d.total_deliveries += 1
@@ -734,6 +722,7 @@ class FoodDeliveryEnvironment(Environment):
                 penalty -= min(raw, self._rwt.idle_penalty_cap)
             else:
                 d.idle_steps = 0
+
         return penalty
 
     def _maybe_spawn_orders(self) -> None:
@@ -745,7 +734,6 @@ class FoodDeliveryEnvironment(Environment):
     # ------------------------------------------------------------------
     # Termination
     # ------------------------------------------------------------------
-
     def _is_done(self) -> bool:
         if self._current_step >= self._cfg.max_steps:
             return True
@@ -763,13 +751,7 @@ class FoodDeliveryEnvironment(Environment):
     # Observation builder
     # ------------------------------------------------------------------
 
-    def _build_obs(
-        self,
-        reward: float,
-        done: bool,
-        action_valid: bool,
-        action_msg: str,
-    ) -> FoodDeliveryObservation:
+    def _build_obs(self, reward: float, done: bool, action_valid: bool, action_msg: str) -> FoodDeliveryObservation:
         total_orders = len(self._orders)
         delivery_rate = self._delivered_all / max(total_orders, 1)
         on_time_rate = self._delivered_ot / max(self._delivered_all, 1)
@@ -777,8 +759,8 @@ class FoodDeliveryEnvironment(Environment):
         driver_infos = [
             DriverInfo(
                 driver_id=int(d.driver_id),
-                x=round(float(d.pos.x), 4),
-                y=round(float(d.pos.y), 4),
+                x=round(float(d.position.x), 4),
+                y=round(float(d.position.y), 4),
                 status=str(d.status.value),
                 assigned_order_id=int(d.assigned_order) if d.assigned_order is not None else None,
                 idle_steps=int(d.idle_steps),
@@ -790,11 +772,12 @@ class FoodDeliveryEnvironment(Environment):
 
         idle_drivers = [d for d in self._drivers if d.status == DriverStatus.IDLE]
         order_infos = []
+
         for o in self._orders:
             nearest_dist: float | None = None
             if o.status == OrderStatus.PENDING and idle_drivers:
                 nearest_dist = round(
-                    float(min(d.pos.dist(o.pickup) for d in idle_drivers)), 4
+                    float(min(d.position.dist(o.pickup) for d in idle_drivers)), 4
                 )
 
             order_infos.append(OrderInfo(
@@ -876,9 +859,8 @@ class FoodDeliveryEnvironment(Environment):
     # ------------------------------------------------------------------
     # World generation helpers
     # ------------------------------------------------------------------
-
-    def _rand_pos(self) -> Pos:
-        return Pos(x=self._rng.uniform(0.0, 1.0), y=self._rng.uniform(0.0, 1.0))
+    def _rand_pos(self) -> Position:
+        return Position(x=self._rng.uniform(0.0, 1.0), y=self._rng.uniform(0.0, 1.0))
 
     def _spawn_order(self) -> Order:
         oid = self._order_counter
