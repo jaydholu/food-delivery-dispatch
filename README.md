@@ -8,8 +8,8 @@ app_port: 7860
 pinned: false
 tags:
   - openenv
-
 ---
+
 # Food Delivery Dispatch — OpenEnv RL Environment
 
 [![OpenEnv](https://img.shields.io/badge/OpenEnv-Compliant-orange)](https://openenv.dev)
@@ -17,7 +17,7 @@ tags:
 [![License](https://img.shields.io/badge/License-MIT-lightgrey)](LICENSE)
 
 > A **production-grade reinforcement learning environment** for multi-driver food delivery dispatch optimisation.  
-> Built with **pure OpenEnv APIs**.  
+> Built with **OpenEnv APIs**.  
 > An LLM or RL agent acts as the **dispatch controller**, assigning orders to drivers to maximise throughput.
 
 ---
@@ -41,26 +41,27 @@ This environment models that exact problem as a **multi-step MDP**. At each step
 ```
 food_delivery_dispatch/
 ├── baseline/
-│   └── run_baseline.py                       ← Greedy nearest-driver policy + evaluation
+│   ├── __init__.py
+│   └── run_baseline.py                        ← Greedy nearest-driver policy + evaluation
 ├── server/
 │   ├── __init__.py
-│   ├── app.py                                ← FastAPI + OpenEnv HTTP/WS server
+│   ├── app.py                                 ← FastAPI + OpenEnv HTTP/WS server
 │   └── food_delivery_dispatch_environment.py  ← Full environment logic (with reward fixes)
 ├── tasks/
-│   ├── easy.py                               ← 2 drivers, 3 orders, no traffic
-│   ├── medium.py                             ← 4 drivers, 8 orders + traffic
-│   ├── hard.py                               ← 6 drivers, 15 orders + traffic + dynamic spawning
-│   ├── grader.py                             ← Scoring formula shared by all tasks
+│   ├── easy.py                                ← 2 drivers, 3 orders, no traffic
+│   ├── medium.py                              ← 4 drivers, 8 orders + traffic
+│   ├── hard.py                                ← 6 drivers, 15 orders + traffic + dynamic spawning
+│   ├── grader.py                              ← Scoring formula shared by all tasks
 │   └── __init__.py
-├── __init__.py                               ← Package exports
-├── client.py                                 ← FoodDeliveryEnv client (WebSocket)
-├── Dockerfile                                ← Production container
-├── inference.py                              ← LLM agent inference script (HuggingFace router)
-├── models.py                                 ← Action & Observation (pure OpenEnv)
-├── openenv.yaml                              ← OpenEnv manifest (all 3 tasks registered)
-├── pyproject.toml                            ← Build config & dependencies
-├── requirements.txt                          ← Runtime dependencies
-└── runtime.txt                               ← Python version
+├── __init__.py                                ← Package exports
+├── client.py                                  ← FoodDeliveryEnv client (WebSocket)
+├── Dockerfile                                 ← Production container
+├── inference.py                               ← LLM agent inference script (HuggingFace router)
+├── models.py                                  ← Action & Observation (pure OpenEnv)
+├── openenv.yaml                               ← OpenEnv manifest (all 3 tasks registered)
+├── pyproject.toml                             ← Build config & dependencies
+├── requirements.txt                           ← Runtime dependencies
+└── runtime.txt                                ← Python version
 ```
 
 ---
@@ -73,7 +74,7 @@ Three difficulty levels are provided, each with increasing complexity:
 
 | Task   | Drivers | Orders | Traffic | Dynamic Spawning | Deadline Range | Max Steps | Target Score |
 |--------|---------|--------|---------|-----------------|----------------|-----------|-------------|
-| easy   | 2       | 3      | ✗       | ✗               | 50-120 steps   | 150       | 0.70+       |
+| easy   | 2       | 3      | ✗       | ✗               | 50-120 steps   | 150       | 0.80+       |
 | medium | 4       | 8      | ✓       | ✗               | 30-80 steps    | 200       | 0.60-0.80   |
 | hard   | 6       | 15     | ✓       | ✓ (~12%/step)   | 25-70 steps    | 300       | 0.50-0.75   |
 
@@ -126,7 +127,7 @@ Four structured, serialisable action types:
 # 1. Assign one driver to one order
 FoodDeliveryAction(action_type="assign", driver_id=0, order_id=2)
 
-# 2. Assign multiple pairs at once (MOST EFFICIENT — preferred)
+# 2. Assign multiple pairs at once
 FoodDeliveryAction(
     action_type="batch",
     assignments=[
@@ -220,6 +221,7 @@ The `inference.py` script uses a carefully designed system prompt to prevent wai
 if action["action_type"] == "wait":
     idle = [d for d in obs_dict.get("drivers", []) if d.get("status") == "idle"]
     pending = [o for o in obs_dict.get("orders", []) if o.get("status") == "pending"]
+
     if idle and pending:
         return safe_default_action(obs_dict)  # Greedy assignment instead
 ```
@@ -342,12 +344,12 @@ Expected baseline scores:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/reset` | POST   | Reset environment, returns initial observation |
-| `/step`  | POST   | Execute action, returns next observation + reward |
+| `/` | GET    | Root Endpoint / Home |
 | `/state` | GET    | Current episode_id and step_count |
 | `/health`| GET    | `{"status": "ok"}` |
 | `/docs`  | GET    | Interactive Swagger UI |
-| `/web`   | GET    | Web interface |
+| `/reset` | POST   | Reset environment, returns initial observation |
+| `/step`  | POST   | Execute action, returns next observation + reward |
 | `/ws`    | WS     | Persistent WebSocket session |
 
 ---
@@ -359,7 +361,7 @@ Expected baseline scores:
 openenv push
 
 # With options
-openenv push --namespace my-org --private
+openenv push --namespace my-org --public
 openenv push --repo-id my-org/food-delivery-dispatch
 ```
 
