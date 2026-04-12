@@ -1,8 +1,7 @@
 """
 HARD task - 6 drivers, 15 initial orders, traffic + dynamic order spawning.
 
-Dynamic spawning means the agent must continuously balance in-progress
-deliveries against newly arriving demand.
+Dynamic spawning means the agent must continuously balance in-progress deliveries against newly arriving demand.
 This is the most realistic and challenging configuration.
 
 Difficulty characteristics:
@@ -19,7 +18,6 @@ Difficulty characteristics:
 from __future__ import annotations
 
 from typing import Any
-import numpy as np
 
 from models import EpisodeResult
 from server.food_delivery_dispatch_environment import (
@@ -54,6 +52,7 @@ def make_hard_env() -> FoodDeliveryEnvironment:
     """
     env = FoodDeliveryEnvironment(task="hard")
     env._rwt = HARD_REWARDS
+    
     return env
 
 
@@ -126,7 +125,7 @@ def grade_hard(
         if verbose:
             print(format_grade_report(score, result, f"HARD - Episode {ep + 1}"))
 
-    mean_score = float(np.mean(scores))
+    mean_score = sum(scores) / len(scores) if scores else 0.0
     if verbose:
         print(f"  [HARD] Mean Score: {mean_score:.4f}\n")
 

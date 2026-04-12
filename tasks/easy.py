@@ -2,8 +2,7 @@
 EASY task - 2 drivers, 3 orders, no traffic, generous deadlines.
 
 Designed for initial policy development and sanity-checking.
-The small state space allows near-exhaustive search and should yield
-high scores (> 0.70) with even simple heuristic policies.
+The small state space allows near-exhaustive search and should yield high scores (> 0.80) with even simple heuristic policies.
 
 Difficulty characteristics:
   - Only 2 drivers and 3 orders (very manageable)
@@ -16,7 +15,6 @@ Difficulty characteristics:
 from __future__ import annotations
 
 from typing import Any
-import numpy as np
 
 from models import EpisodeResult
 from server.food_delivery_dispatch_environment import (
@@ -51,6 +49,7 @@ def make_easy_env() -> FoodDeliveryEnvironment:
     """
     env = FoodDeliveryEnvironment(task="easy")
     env._rwt = EASY_REWARDS
+    
     return env
 
 
@@ -121,7 +120,7 @@ def grade_easy(
         if verbose:
             print(format_grade_report(score, result, f"EASY - Episode {ep + 1}"))
 
-    mean_score = float(np.mean(scores))
+    mean_score = sum(scores) / len(scores) if scores else 0.0
     if verbose:
         print(f"  [EASY] Mean Score: {mean_score:.4f}\n")
 

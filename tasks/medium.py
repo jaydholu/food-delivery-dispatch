@@ -1,8 +1,7 @@
 """
 MEDIUM task - 4 drivers, 8 orders, with traffic congestion zones.
 
-Traffic zones introduce stochastic travel-time variation that requires the
-agent to reason about route feasibility beyond pure distance.
+Traffic zones introduce stochastic travel-time variation that requires the agent to reason about route feasibility beyond pure distance.
 
 Difficulty characteristics:
   - 4 drivers, 8 orders (moderate complexity)
@@ -16,7 +15,6 @@ Difficulty characteristics:
 from __future__ import annotations
 
 from typing import Any
-import numpy as np
 
 from models import EpisodeResult
 from server.food_delivery_dispatch_environment import (
@@ -121,7 +119,7 @@ def grade_medium(
         if verbose:
             print(format_grade_report(score, result, f"MEDIUM - Episode {ep + 1}"))
 
-    mean_score = float(np.mean(scores))
+    mean_score = sum(scores) / len(scores) if scores else 0.0
     if verbose:
         print(f"  [MEDIUM] Mean Score: {mean_score:.4f}\n")
 
